@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.27 - 2026-02-13
+
+### Fixed
+- **WhisperOS Device Support**: Devices running WhisperOS now appear in Bluetooth scan list
+  - Added 'whisper' to device name filter in Bluetooth scanning
+  - Users with WhisperOS-based MeshCore devices can now connect to the app
+  - Line 152 in lora_companion_service.dart
+
 ## v1.0.26 - 2026-02-12
 
 ### Fixed
