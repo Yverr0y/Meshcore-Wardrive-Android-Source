@@ -85,6 +85,9 @@ class _MapScreenState extends State<MapScreen> {
   // Color blind mode
   String _colorBlindMode = 'normal';
   
+  // Discovery timeout (10-30 seconds)
+  int _discoveryTimeoutSeconds = 20;
+  
   // Screenshot mode - hide UI elements
   bool _hideUIForScreenshot = false;
   
@@ -186,6 +189,7 @@ class _MapScreenState extends State<MapScreen> {
     final filterEdges = await _settingsService.getFilterEdgesByWhitelist();
     final distanceUnit = await _settingsService.getDistanceUnit();
     final colorBlindMode = await _settingsService.getColorBlindMode();
+    final discoveryTimeout = await _settingsService.getDiscoveryTimeout();
     
     setState(() {
       _showSamples = showSamples;
@@ -201,6 +205,7 @@ class _MapScreenState extends State<MapScreen> {
       _filterEdgesByWhitelist = filterEdges;
       _distanceUnit = distanceUnit;
       _colorBlindMode = colorBlindMode;
+      _discoveryTimeoutSeconds = discoveryTimeout;
     });
     
     // Apply to services
@@ -1650,6 +1655,27 @@ class _MapScreenState extends State<MapScreen> {
                   });
                   setModalState(() {});
                   await _settingsService.setColorBlindMode(value!);
+                },
+              ),
+            ),
+            ListTile(
+              title: const Text('Discovery Timeout'),
+              subtitle: const Text('How long to wait for repeater responses'),
+              trailing: DropdownButton<int>(
+                value: _discoveryTimeoutSeconds,
+                items: const [
+                  DropdownMenuItem(value: 10, child: Text('10s')),
+                  DropdownMenuItem(value: 15, child: Text('15s')),
+                  DropdownMenuItem(value: 20, child: Text('20s')),
+                  DropdownMenuItem(value: 25, child: Text('25s')),
+                  DropdownMenuItem(value: 30, child: Text('30s')),
+                ],
+                onChanged: (value) async {
+                  setState(() {
+                    _discoveryTimeoutSeconds = value!;
+                  });
+                  setModalState(() {});
+                  await _settingsService.setDiscoveryTimeout(value!);
                 },
               ),
             ),
