@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.0.29 - 2026-02-27
+
+### ⚠️ IMPORTANT: Reinstall Required
+The app package name has changed from `com.example.meshcore_wardrive` to `mintylinux.meshcore.wardrive`. Android treats this as a completely different app, so you **must uninstall the old version** before installing v1.0.29.
+
+**Before updating:**
+1. Open the app and go to **Settings → Export Data** to back up your samples
+2. Uninstall the old version
+3. Install v1.0.29
+4. Go to **Settings → Import Data** to restore your samples
+
+### Added
+- **Editable Upload Sites**: Upload endpoint addresses can now be edited (previously only deletable)
+  - Blue edit icon next to each site in Manage Upload Sites
+  - Edit both site name and API URL
+- **Total Distance Driven**: Persistent all-time mileage tracker across all sessions
+  - Displayed in new "Statistics" section in Settings
+  - Supports miles and kilometers based on distance unit setting
+  - Reset button with confirmation dialog
+- **Estimated Fuel Usage**: Rough fuel consumption estimate based on distance driven
+  - Set your vehicle's MPG in Settings to enable
+  - Shows gallons used and estimated cost
+- **Configurable Gas Price**: Set your local gas price per gallon (default $3.50)
+  - Used in fuel cost estimation
+
+### Changed
+- **Package name**: Changed from `com.example.meshcore_wardrive` to `mintylinux.meshcore.wardrive`
+
 ## v1.0.28 - 2026-02-19
 
 ### Added

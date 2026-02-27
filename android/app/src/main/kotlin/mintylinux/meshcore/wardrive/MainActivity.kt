@@ -1,4 +1,4 @@
-package com.example.meshcore_wardrive
+package mintylinux.meshcore.wardrive
 
 import io.flutter.embedding.android.FlutterActivity
 
