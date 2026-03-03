@@ -15,8 +15,19 @@ A Flutter-based Android application for mapping MeshCore mesh network coverage i
 - Success rate based coverage visualization with color coding
 - Clickable coverage squares showing detailed statistics
 - Repeater discovery and tracking
-- Data export to JSON
-- Web map upload functionality
+- Per-repeater coverage filtering
+- Coverage gap finder for identifying dead zones
+- Data export to JSON, CSV, GPX, and KML
+- Share coverage map screenshots with stats
+- Web map upload functionality (multi-site)
+- Route trail with color-coded path
+- Session history with notes and replay
+- Offline map tile caching
+- Heatmap overlay visualization
+- Signal trend charts (RSSI, SNR, response time)
+- Live speed display
+- Repeater response time tracking
+- Color blind accessibility modes
 - Debug terminal with logging
 - Light/Dark theme support
 
@@ -65,21 +76,29 @@ The APK will be located at: `build/app/outputs/flutter-apk/app-release.apk`
 ```
 lib/
 ├── main.dart                    # App entry point
+├── constants/
+│   └── app_version.dart         # Version constant
 ├── models/
-│   └── models.dart              # Data models (Sample, Coverage, Repeater)
+│   └── models.dart              # Data models (Sample, Coverage, Repeater, WSession)
 ├── screens/
-│   ├── map_screen.dart          # Main map interface
-│   └── debug_log_screen.dart    # Debug terminal
+│   ├── map_screen.dart              # Main map interface
+│   ├── debug_log_screen.dart        # Debug terminal
+│   ├── debug_diagnostics_screen.dart # Advanced diagnostics
+│   ├── session_history_screen.dart   # Session history viewer
+│   └── signal_trend_screen.dart      # Signal trend charts
 ├── services/
 │   ├── location_service.dart         # GPS tracking & auto-ping
 │   ├── lora_companion_service.dart   # LoRa device communication
 │   ├── database_service.dart         # SQLite database
 │   ├── aggregation_service.dart      # Coverage calculation
 │   ├── upload_service.dart           # Web map upload
+│   ├── settings_service.dart         # User preferences
 │   ├── meshcore_protocol.dart        # Protocol implementation
-│   └── debug_log_service.dart        # Debug logging
+│   ├── debug_log_service.dart        # Debug logging
+│   └── persistent_debug_logger.dart  # Persistent log storage
 └── utils/
-    └── geohash_utils.dart        # Geohash utilities
+    ├── geohash_utils.dart        # Geohash utilities
+    └── color_blind_palette.dart  # Accessible color schemes
 ```
 
 ## 🔧 Configuration
@@ -121,6 +140,9 @@ flutter test
 
 Key packages:
 - `flutter_map` - Map display
+- `flutter_map_cache` - Offline tile caching
+- `flutter_map_heatmap` - Heatmap overlay
+- `fl_chart` - Signal trend charts
 - `geolocator` - GPS tracking
 - `flutter_foreground_task` - Background service
 - `usb_serial` - USB connectivity
@@ -128,6 +150,8 @@ Key packages:
 - `sqflite` - Local database
 - `geohash_plus` - Geohash encoding
 - `pointycastle` - Encryption
+- `share_plus` - Share screenshots & exports
+- `screenshot` / `saver_gallery` - Screenshot capture
 
 See [pubspec.yaml](pubspec.yaml) for complete list.
 
@@ -162,6 +186,6 @@ For issues and questions:
 
 ---
 
-**Current Version:** 1.0.7
+**Current Version:** 1.0.30
 
 **Minimum Android Version:** Android 5.0 (API 21)

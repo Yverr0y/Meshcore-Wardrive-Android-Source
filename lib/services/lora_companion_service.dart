@@ -23,6 +23,7 @@ class PingResult {
   final double? latitude;
   final double? longitude;
   final String? error;
+  final int? responseTimeMs;
 
   PingResult({
     required this.timestamp,
@@ -33,6 +34,7 @@ class PingResult {
     this.latitude,
     this.longitude,
     this.error,
+    this.responseTimeMs,
   });
 
   Map<String, dynamic> toJson() => {
@@ -44,6 +46,7 @@ class PingResult {
         'latitude': latitude,
         'longitude': longitude,
         'error': error,
+        'responseTimeMs': responseTimeMs,
       };
 }
 
@@ -613,6 +616,7 @@ class LoRaCompanionService {
       await _sendBinaryToDevice(controlCmd);
       
       _lastPingTime = DateTime.now();
+      final pingSendTime = _lastPingTime!;
       _debugLog.logPing('📍 Discovery ping sent at ($latitude, $longitude)');
       _debugLog.logInfo('Note: Repeaters rate-limit to 4 responses per 2 minutes');
       print('📍 Discovery ping sent, tag=0x${tag.toRadixString(16)}, waiting for responses...');
@@ -634,8 +638,9 @@ class LoRaCompanionService {
             responses.sort((a, b) => (b['snr'] as int).compareTo(a['snr'] as int));
             final best = responses.first;
             
-            print('✅ Ping complete (early): ${responses.length} repeater(s) responded');
-            _debugLog.logPing('✅ Best response: ${best["nodeId"]} (SNR=${best["snr"]}, RSSI=${best["rssi"]})');
+            final elapsed = DateTime.now().difference(pingSendTime).inMilliseconds;
+            print('✅ Ping complete (early): ${responses.length} repeater(s) responded in ${elapsed}ms');
+            _debugLog.logPing('✅ Best response: ${best["nodeId"]} (SNR=${best["snr"]}, RSSI=${best["rssi"]}, ${elapsed}ms)');
             
             final result = PingResult(
               timestamp: DateTime.now(),
@@ -645,6 +650,7 @@ class LoRaCompanionService {
               nodeId: best['nodeId'] as String,
               latitude: latitude,
               longitude: longitude,
+              responseTimeMs: elapsed,
             );
             completer.complete(result);
             _pingResultController.add(result);
@@ -660,13 +666,15 @@ class LoRaCompanionService {
           
           if (responses.isEmpty) {
             // No repeaters responded - dead zone
-            print('⏰ Ping timeout. No repeaters responded.');
+            final elapsed = DateTime.now().difference(pingSendTime).inMilliseconds;
+            print('⏰ Ping timeout after ${elapsed}ms. No repeaters responded.');
             final result = PingResult(
               timestamp: DateTime.now(),
               status: PingStatus.timeout,
               latitude: latitude,
               longitude: longitude,
               error: 'No repeaters in range - dead zone',
+              responseTimeMs: elapsed,
             );
             completer.complete(result);
             _pingResultController.add(result);
@@ -675,8 +683,9 @@ class LoRaCompanionService {
             responses.sort((a, b) => (b['snr'] as int).compareTo(a['snr'] as int));
             final best = responses.first;
             
-            print('✅ Ping complete: ${responses.length} repeater(s) responded');
-            _debugLog.logPing('✅ Best response: ${best["nodeId"]} (SNR=${best["snr"]}, RSSI=${best["rssi"]})');
+            final elapsed = DateTime.now().difference(pingSendTime).inMilliseconds;
+            print('✅ Ping complete: ${responses.length} repeater(s) responded in ${elapsed}ms');
+            _debugLog.logPing('✅ Best response: ${best["nodeId"]} (SNR=${best["snr"]}, RSSI=${best["rssi"]}, ${elapsed}ms)');
             
             final result = PingResult(
               timestamp: DateTime.now(),
@@ -686,6 +695,7 @@ class LoRaCompanionService {
               nodeId: best['nodeId'] as String,
               latitude: latitude,
               longitude: longitude,
+              responseTimeMs: elapsed,
             );
             completer.complete(result);
             _pingResultController.add(result);
