@@ -1,12 +1,12 @@
 v1.0.30:
-• Route trail: color-coded path showing your driven route
-• Session history: track and review individual wardrive sessions
-• Offline map tiles: cached automatically as you browse
-• Heatmap overlay: smooth heat gradient visualization
-• Speed display: live speed readout during tracking
+• Route trail: color-coded driven path on map
+• Session history: track individual wardrive sessions
+• Offline map tiles: cached as you browse
+• Heatmap overlay visualization
+• Live speed display during tracking
 • CSV, GPX, KML export formats
 • Share coverage map screenshots with stats
 • Per-repeater coverage filtering
-• Coverage gap finder for identifying dead zones
+• Coverage gap finder for dead zones
 • Signal trend charts (RSSI, SNR, response time)
 • Repeater response time tracking
