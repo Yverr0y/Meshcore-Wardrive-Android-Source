@@ -1,0 +1,32 @@
+MeshCore Wardrive is an Android app for mapping MeshCore mesh network coverage in real-time. Connect a LoRa companion radio via USB or Bluetooth, drive around, and watch your coverage map build automatically.
+
+The app sends ping requests through your LoRa device, listens for observer responses via MQTT, and visualizes the results on an interactive map with color-coded coverage squares showing signal reliability.
+
+Features:
+• Real-time GPS tracking with foreground service for background operation
+• USB and Bluetooth connectivity for MeshCore companion radios
+• Auto-ping with configurable distance intervals (50m, 200m, 0.5mi, 1mi)
+• Success rate coverage visualization: green (reliable) through red (dead zone)
+• Heatmap overlay for smooth signal visualization
+• Route trail showing your driven path color-coded by ping results
+• Session history to track and review individual wardrive sessions
+• Offline map tile caching — tiles cache as you view them
+• Per-repeater coverage filtering to see which areas each repeater covers
+• Coverage gap finder to identify dead zones
+• Signal trend charts for RSSI, SNR, and response time over time
+• Data export in JSON, CSV, GPX, and KML formats
+• Share coverage map screenshots with stats overlay
+• Upload data to web map for community coverage mapping
+• Repeater discovery and tracking during wardriving
+• Response time measurement for each ping
+• Live speed display during tracking
+• Color blind accessibility modes (Deuteranopia, Protanopia, Tritanopia)
+• Light and dark theme support
+• Debug terminal with detailed logging
+
+Requirements:
+• A MeshCore-compatible LoRa companion radio device
+• USB OTG cable (for USB connection) or Bluetooth pairing
+• GPS/Location permissions (including background location for tracking)
+
+MeshCore Wardrive helps the mesh networking community understand and improve their network coverage by creating detailed signal maps that can be shared and compared.

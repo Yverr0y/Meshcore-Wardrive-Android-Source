@@ -54,6 +54,12 @@ android {
             }
         }
     }
+
+    // Disable encrypted dependency metadata (required for IzzyOnDroid/F-Droid)
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
 }
 
 flutter {
