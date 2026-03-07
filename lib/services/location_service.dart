@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math';
 import 'package:geolocator/geolocator.dart';
+import 'package:geolocator_android/geolocator_android.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/models.dart';
@@ -90,10 +92,16 @@ class LocationService {
       if (!isEnabled) return null;
 
       final Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 0,
-        ),
+        locationSettings: Platform.isAndroid
+            ? AndroidSettings(
+                accuracy: LocationAccuracy.high,
+                distanceFilter: 0,
+                forceLocationManager: true,
+              )
+            : const LocationSettings(
+                accuracy: LocationAccuracy.high,
+                distanceFilter: 0,
+              ),
       );
 
       return LatLng(position.latitude, position.longitude);
@@ -174,10 +182,16 @@ class LocationService {
       await _logger.logServiceEvent('Foreground service started successfully');
       print('Foreground service started');
       
-      const LocationSettings locationSettings = LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 5, // Update every 5 meters
-      );
+      final locationSettings = Platform.isAndroid
+          ? AndroidSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 5, // Update every 5 meters
+              forceLocationManager: true,
+            )
+          : const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 5,
+            );
 
       _positionStreamSubscription = Geolocator.getPositionStream(
         locationSettings: locationSettings,
