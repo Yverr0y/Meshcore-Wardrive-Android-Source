@@ -1,5 +1,37 @@
 # Changelog
 
+## v1.0.31 - 2026-03-08
+
+### ⚠️ IMPORTANT: Reinstall Required
+The APK signing key has changed in this release. Android will reject an in-place update with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. You **must uninstall the previous version** before installing v1.0.31.
+
+**Before updating:**
+1. Open the app and go to **Settings → Export Data** to back up your samples
+2. Uninstall the old version (`adb uninstall mintylinux.meshcore.wardrive` or via Android Settings)
+3. Install v1.0.31
+4. Go to **Settings → Import Data** to restore your samples
+
+### Added
+- **Coverage Prediction Rings**: Visualize estimated repeater coverage on the map
+  - Concentric rings around each repeater based on actual ping sample distances
+  - Green inner ring = strong coverage (25th percentile distance)
+  - Yellow middle ring = moderate coverage (75th percentile)
+  - Red outer ring = edge of coverage (max observed distance)
+  - Requires at least 3 successful pings per repeater to display
+  - Toggle in Settings: "Show Prediction Rings"
+- **Android Home Screen Widget**: 4×2 dark-themed widget for at-a-glance stats
+  - Shows tracking status (Tracking/Idle) with color indicator
+  - Sample count, LoRa connection type (USB/BT), success rate %, session distance
+  - Updates in real-time as you drive
+  - Tap widget to open the app
+  - Add via long-press home screen → Widgets → MeshCore Wardrive
+
+### Technical
+- New `WidgetService` wrapping `home_widget` package for native Android widget updates
+- Native `WardriveWidgetProvider.kt` with `SharedPreferences`-based data bridge
+- Widget state pushed on tracking start/stop, sample saves, and connection changes
+- Added `home_widget: ^0.7.0` dependency
+
 ## v1.0.30 - 2026-03-03
 
 ### Added

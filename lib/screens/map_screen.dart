@@ -15,6 +15,7 @@ import '../services/upload_service.dart';
 import '../services/settings_service.dart';
 import '../utils/geohash_utils.dart';
 import '../utils/color_blind_palette.dart';
+import '../services/widget_service.dart';
 import 'package:geohash_plus/geohash_plus.dart' as geohash;
 import 'package:usb_serial/usb_serial.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -126,6 +127,9 @@ class _MapScreenState extends State<MapScreen> {
   // Heatmap
   bool _showHeatmap = false;
   final StreamController<void> _heatmapRebuildStream = StreamController.broadcast();
+  
+  // Coverage prediction rings
+  bool _showPredictionRings = false;
 
   @override
   void initState() {
@@ -137,6 +141,9 @@ class _MapScreenState extends State<MapScreen> {
     // Initialize tile cache store
     final cacheDir = await getApplicationDocumentsDirectory();
     _tileCacheStore = FileCacheStore('${cacheDir.path}/tile_cache');
+    
+    // Initialize home screen widget
+    await WidgetService.initialize();
     
     // Load saved settings
     await _loadSettings();
@@ -232,6 +239,7 @@ class _MapScreenState extends State<MapScreen> {
     final fuelUnit = await _settingsService.getFuelUnit();
     final showRouteTrail = await _settingsService.getShowRouteTrail();
     final showHeatmap = await _settingsService.getShowHeatmap();
+    final showPredictionRings = await _settingsService.getShowPredictionRings();
     
     setState(() {
       _showSamples = showSamples;
@@ -251,6 +259,7 @@ class _MapScreenState extends State<MapScreen> {
       _fuelUnit = fuelUnit;
       _showRouteTrail = showRouteTrail;
       _showHeatmap = showHeatmap;
+      _showPredictionRings = showPredictionRings;
     });
     
     // Apply to services
@@ -312,15 +321,38 @@ class _MapScreenState extends State<MapScreen> {
     
     final combinedRepeaters = repeaterMap.values.toList();
     
+    final isConnected = loraService.isDeviceConnected;
+    final connType = loraService.connectionType;
+    
     setState(() {
       _samples = samples;
       _sampleCount = count;
       _aggregationResult = result;
-      _loraConnected = loraService.isDeviceConnected;
-      _connectionType = loraService.connectionType;
+      _loraConnected = isConnected;
+      _connectionType = connType;
       _autoPingEnabled = _locationService.isAutoPingEnabled;
       _repeaters = combinedRepeaters;
     });
+    
+    // Update home screen widget
+    final connLabel = isConnected
+        ? (connType == ConnectionType.usb ? 'USB' : 'BT')
+        : '---';
+    final pingSamples = samples.where((s) => s.pingSuccess != null).toList();
+    final successCount = pingSamples.where((s) => s.pingSuccess == true).length;
+    final rate = pingSamples.isNotEmpty
+        ? '${(successCount / pingSamples.length * 100).toStringAsFixed(0)}%'
+        : '--';
+    final dist = _isTracking
+        ? '${_totalDistance.toStringAsFixed(1)} ${_distanceUnit == "miles" ? "mi" : "km"}'
+        : '--';
+    WidgetService.update(
+      sampleCount: count,
+      isTracking: _isTracking,
+      connectionLabel: connLabel,
+      successRate: rate,
+      distance: dist,
+    );
   }
 
   Future<void> _toggleTracking() async {
@@ -910,6 +942,7 @@ $placemarks  </Document>
         if (_showSamples) _buildSampleLayer(),
         if (_showEdges) _buildEdgeLayer(),
         if (_showRepeaters) _buildRepeaterLayer(),
+        if (_showPredictionRings) _buildPredictionRingsLayer(),
         if (_currentPosition != null && !_hideUIForScreenshot) _buildCurrentLocationLayer(),
       ],
     );
@@ -1185,6 +1218,96 @@ $placemarks  </Document>
     }).toList();
     
     return MarkerLayer(markers: markers);
+  }
+
+  /// Generate polygon points approximating a circle at a given radius
+  List<LatLng> _circlePoints(LatLng center, double radiusMeters, {int segments = 72}) {
+    const distance = Distance();
+    return List.generate(segments, (i) {
+      final bearing = (360.0 / segments) * i;
+      return distance.offset(center, radiusMeters, bearing);
+    });
+  }
+
+  Widget _buildPredictionRingsLayer() {
+    if (_repeaters.isEmpty || _samples.isEmpty) return const SizedBox.shrink();
+
+    // Build lookup: repeater ID -> list of distances (meters) from successful samples
+    final Map<String, List<double>> repeaterDistances = {};
+    final Map<String, Repeater> repeaterById = {};
+    const distance = Distance();
+
+    for (final repeater in _repeaters) {
+      // Skip repeaters at 0,0 (unknown position)
+      if (repeater.position.latitude == 0.0 && repeater.position.longitude == 0.0) continue;
+      repeaterById[repeater.id] = repeater;
+    }
+
+    // Match samples to repeaters by path (nodeId)
+    for (final sample in _samples) {
+      if (sample.pingSuccess != true || sample.path == null || sample.path!.isEmpty) continue;
+      final repeater = repeaterById[sample.path!];
+      if (repeater == null) continue;
+
+      final dist = distance.as(LengthUnit.Meter, sample.position, repeater.position);
+      // Skip impossibly large distances (GPS noise)
+      if (dist > 100000) continue; // 100km sanity cap
+
+      repeaterDistances.putIfAbsent(repeater.id, () => []);
+      repeaterDistances[repeater.id]!.add(dist);
+    }
+
+    final polygons = <Polygon>[];
+
+    for (final entry in repeaterDistances.entries) {
+      final repeater = repeaterById[entry.key]!;
+      final distances = entry.value..sort();
+
+      // Need at least 3 data points for meaningful prediction
+      if (distances.length < 3) continue;
+
+      // Percentile-based rings
+      final p25 = distances[(distances.length * 0.25).floor()];
+      final p75 = distances[(distances.length * 0.75).floor()];
+      final maxDist = distances.last;
+
+      // Skip if rings would be too small to see (<50m)
+      if (maxDist < 50) continue;
+
+      // Edge ring (outer, red) — max observed distance
+      polygons.add(Polygon(
+        points: _circlePoints(repeater.position, maxDist),
+        color: Colors.red.withValues(alpha: 0.05),
+        borderColor: Colors.red.withValues(alpha: 0.35),
+        borderStrokeWidth: 1.5,
+        isFilled: true,
+      ));
+
+      // Moderate ring (middle, yellow)
+      if (p75 > 50 && p75 < maxDist * 0.95) {
+        polygons.add(Polygon(
+          points: _circlePoints(repeater.position, p75),
+          color: Colors.yellow.withValues(alpha: 0.08),
+          borderColor: Colors.yellow.withValues(alpha: 0.5),
+          borderStrokeWidth: 1.5,
+          isFilled: true,
+        ));
+      }
+
+      // Strong ring (inner, green)
+      if (p25 > 50 && p25 < p75 * 0.95) {
+        polygons.add(Polygon(
+          points: _circlePoints(repeater.position, p25),
+          color: Colors.green.withValues(alpha: 0.10),
+          borderColor: Colors.green.withValues(alpha: 0.6),
+          borderStrokeWidth: 1.5,
+          isFilled: true,
+        ));
+      }
+    }
+
+    if (polygons.isEmpty) return const SizedBox.shrink();
+    return PolygonLayer(polygons: polygons);
   }
 
   Widget _buildCurrentLocationLayer() {
@@ -1888,6 +2011,18 @@ $placemarks  </Document>
                 await _settingsService.setShowHeatmap(value);
                 // Trigger heatmap rebuild
                 _heatmapRebuildStream.add(null);
+              },
+            ),
+            SwitchListTile(
+              title: const Text('Show Prediction Rings'),
+              subtitle: const Text('Estimated repeater coverage radius'),
+              value: _showPredictionRings,
+              onChanged: (value) async {
+                setState(() {
+                  _showPredictionRings = value;
+                });
+                setModalState(() {});
+                await _settingsService.setShowPredictionRings(value);
               },
             ),
             SwitchListTile(

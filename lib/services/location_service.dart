@@ -13,6 +13,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'persistent_debug_logger.dart';
 import 'settings_service.dart';
+import 'widget_service.dart';
 
 class LocationService {
   final DatabaseService _dbService = DatabaseService();
@@ -213,6 +214,7 @@ class LocationService {
       print('Wakelock enabled - app will stay active during tracking');
 
       _isTracking = true;
+      WidgetService.updateTrackingStatus(true);
       
       // Reset distance tracking for new session
       _totalDistanceMeters = 0.0;
@@ -515,6 +517,7 @@ class LocationService {
     }
     
     _isTracking = false;
+    WidgetService.updateTrackingStatus(false);
     await _logger.logServiceEvent('Tracking stopped successfully');
   }
 
