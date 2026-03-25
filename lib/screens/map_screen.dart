@@ -36,6 +36,8 @@ import 'session_history_screen.dart';
 import 'signal_trend_screen.dart';
 import '../main.dart';
 import '../constants/app_version.dart';
+import '../services/ducting_service.dart';
+import 'analytics_screen.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -130,6 +132,10 @@ class _MapScreenState extends State<MapScreen> {
   
   // Coverage prediction rings
   bool _showPredictionRings = false;
+  
+  // Atmospheric ducting
+  bool _showDucting = false;
+  String _currentDuctingRisk = DuctingRisk.unknown;
 
   @override
   void initState() {
@@ -240,6 +246,7 @@ class _MapScreenState extends State<MapScreen> {
     final showRouteTrail = await _settingsService.getShowRouteTrail();
     final showHeatmap = await _settingsService.getShowHeatmap();
     final showPredictionRings = await _settingsService.getShowPredictionRings();
+    final showDucting = await _settingsService.getShowDucting();
     
     setState(() {
       _showSamples = showSamples;
@@ -260,6 +267,7 @@ class _MapScreenState extends State<MapScreen> {
       _showRouteTrail = showRouteTrail;
       _showHeatmap = showHeatmap;
       _showPredictionRings = showPredictionRings;
+      _showDucting = showDucting;
     });
     
     // Apply to services
@@ -333,6 +341,14 @@ class _MapScreenState extends State<MapScreen> {
       _autoPingEnabled = _locationService.isAutoPingEnabled;
       _repeaters = combinedRepeaters;
     });
+    
+    // Update ducting badge if enabled
+    if (_showDucting) {
+      final risk = await _locationService.ductingService.getLatestRisk();
+      if (mounted && risk != _currentDuctingRisk) {
+        setState(() { _currentDuctingRisk = risk; });
+      }
+    }
     
     // Update home screen widget
     final connLabel = isConnected
@@ -1236,10 +1252,18 @@ $placemarks  </Document>
     final Map<String, List<double>> repeaterDistances = {};
     final Map<String, Repeater> repeaterById = {};
     const distance = Distance();
+    final allowedPrefixes = _includeOnlyRepeaters != null && _includeOnlyRepeaters!.isNotEmpty
+        ? _includeOnlyRepeaters!.split(',').map((s) => s.trim().toUpperCase()).toList()
+        : null;
 
     for (final repeater in _repeaters) {
       // Skip repeaters at 0,0 (unknown position)
       if (repeater.position.latitude == 0.0 && repeater.position.longitude == 0.0) continue;
+      if (allowedPrefixes != null) {
+        final repeaterId = repeater.id.toUpperCase();
+        final matches = allowedPrefixes.any((prefix) => repeaterId.startsWith(prefix));
+        if (!matches) continue;
+      }
       repeaterById[repeater.id] = repeater;
     }
 
@@ -1404,20 +1428,42 @@ $placemarks  </Document>
               const Text('•', style: TextStyle(color: Colors.grey)),
               const SizedBox(width: 12),
               // Stats
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Samples: $_sampleCount',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                  if (_isTracking)
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     Text(
-                      '${_totalDistance.toStringAsFixed(2)} ${_distanceUnit == 'miles' ? 'mi' : 'km'} • ${_currentSpeed.toStringAsFixed(1)} ${_distanceUnit == 'miles' ? 'mph' : 'km/h'}',
-                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      'Samples: $_sampleCount',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                     ),
-                ],
+                    if (_isTracking)
+                      Text(
+                        '${_totalDistance.toStringAsFixed(2)} ${_distanceUnit == 'miles' ? 'mi' : 'km'} • ${_currentSpeed.toStringAsFixed(1)} ${_distanceUnit == 'miles' ? 'mph' : 'km/h'}',
+                        style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      ),
+                    if (_showDucting && _currentDuctingRisk != DuctingRisk.unknown)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: _getDuctingColor(_currentDuctingRisk).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: _getDuctingColor(_currentDuctingRisk), width: 1),
+                          ),
+                          child: Text(
+                            'Ducting: ${DuctingService.riskLabel(_currentDuctingRisk)}',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: _getDuctingColor(_currentDuctingRisk),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
               const Spacer(),
               // Connect button or Manual Ping
@@ -2026,6 +2072,24 @@ $placemarks  </Document>
               },
             ),
             SwitchListTile(
+              title: const Text('Atmospheric Ducting'),
+              subtitle: const Text('Monitor ducting conditions (needs internet)'),
+              value: _showDucting,
+              onChanged: (value) async {
+                setState(() {
+                  _showDucting = value;
+                });
+                setModalState(() {});
+                await _settingsService.setShowDucting(value);
+                _locationService.setDuctingEnabled(value);
+                if (value) {
+                  // Fetch immediately and update badge
+                  final risk = await _locationService.ductingService.getLatestRisk();
+                  setState(() { _currentDuctingRisk = risk; });
+                }
+              },
+            ),
+            SwitchListTile(
               title: const Text('Lock Map Rotation'),
               subtitle: const Text('Prevent map rotation'),
               value: _lockRotationNorth,
@@ -2418,6 +2482,25 @@ $placemarks  </Document>
               ),
             ),
             ListTile(
+              title: const Text('Analytics'),
+              subtitle: const Text('Time, goals, comparison & repeater stats'),
+              leading: const Icon(Icons.analytics),
+              trailing: const Icon(Icons.arrow_forward),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AnalyticsScreen(
+                      samples: _samples,
+                      coveragePrecision: _coveragePrecision,
+                      currentPosition: _currentPosition,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
               title: const Text('Session History'),
               subtitle: Text(_activeSessionFilter != null 
                   ? 'Filtering by session' 
@@ -2670,6 +2753,19 @@ $placemarks  </Document>
     return Colors.red;
   }
   
+  Color _getDuctingColor(String risk) {
+    switch (risk) {
+      case 'none':
+        return Colors.green;
+      case 'possible':
+        return Colors.orange;
+      case 'likely':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+  
   Future<void> _refreshContacts() async {
     if (!_loraConnected) {
       _showSnackBar('Connect LoRa device first');
@@ -2882,6 +2978,29 @@ $placemarks  </Document>
                 children: [
                   const Text('Response: ', style: TextStyle(fontWeight: FontWeight.bold)),
                   Text('${sample.responseTimeMs} ms'),
+                ],
+              ),
+            ],
+            if (sample.ductingRisk != null) ...[
+              const Divider(height: 16),
+              Row(
+                children: [
+                  const Text('Ducting: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _getDuctingColor(sample.ductingRisk!).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      DuctingService.riskLabel(sample.ductingRisk!),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: _getDuctingColor(sample.ductingRisk!),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ],

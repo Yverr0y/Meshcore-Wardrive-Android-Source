@@ -14,12 +14,14 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'persistent_debug_logger.dart';
 import 'settings_service.dart';
 import 'widget_service.dart';
+import 'ducting_service.dart';
 
 class LocationService {
   final DatabaseService _dbService = DatabaseService();
   final LoRaCompanionService _loraCompanion = LoRaCompanionService();
   final PersistentDebugLogger _logger = PersistentDebugLogger();
   final SettingsService _settings = SettingsService();
+  final DuctingService _ductingService = DuctingService();
   StreamSubscription<Position>? _positionStreamSubscription;
   bool _isTracking = false;
   bool _autoPingEnabled = false;
@@ -56,6 +58,33 @@ class LocationService {
   double _currentSpeedMps = 0.0;
   double get currentSpeedMph => _currentSpeedMps * 2.23694;
   double get currentSpeedKmh => _currentSpeedMps * 3.6;
+  
+  // Ducting monitoring
+  bool _ductingEnabled = false;
+  Timer? _ductingFetchTimer;
+  
+  /// Get ducting service for UI access
+  DuctingService get ductingService => _ductingService;
+  
+  /// Enable or disable ducting monitoring at runtime
+  void setDuctingEnabled(bool enabled) {
+    _ductingEnabled = enabled;
+    if (enabled && _isTracking && _lastPosition != null) {
+      // Kick off an initial fetch and start periodic timer
+      _ductingService.fetchAndCache(_lastPosition!.latitude, _lastPosition!.longitude);
+      _ductingFetchTimer?.cancel();
+      _ductingFetchTimer = Timer.periodic(const Duration(minutes: 60), (_) async {
+        if (_lastPosition != null) {
+          await _ductingService.fetchAndCache(
+            _lastPosition!.latitude, _lastPosition!.longitude,
+          );
+        }
+      });
+    } else if (!enabled) {
+      _ductingFetchTimer?.cancel();
+      _ductingFetchTimer = null;
+    }
+  }
 
   /// Check if location permissions are granted
   Future<bool> checkPermissions() async {
@@ -221,6 +250,26 @@ class LocationService {
       _lastPosition = null;
       _totalDistanceController.add(_totalDistanceMeters);
       
+      // Start ducting monitoring if enabled (non-blocking)
+      _ductingEnabled = await _settings.getShowDucting();
+      if (_ductingEnabled) {
+        // Fire-and-forget initial fetch using the position stream (don't block with getCurrentPosition)
+        _ductingFetchTimer?.cancel();
+        _ductingFetchTimer = Timer.periodic(const Duration(minutes: 60), (_) async {
+          if (_lastPosition != null) {
+            await _ductingService.fetchAndCache(
+              _lastPosition!.latitude, _lastPosition!.longitude,
+            );
+          }
+        });
+        // Kick off first fetch after a short delay so GPS has time to get a fix
+        Future.delayed(const Duration(seconds: 5), () {
+          if (_lastPosition != null) {
+            _ductingService.fetchAndCache(_lastPosition!.latitude, _lastPosition!.longitude);
+          }
+        });
+      }
+      
       // Create a new session record
       _sessionStartTime = DateTime.now();
       try {
@@ -378,6 +427,13 @@ class LocationService {
     }
 
     // Only save GPS sample if auto-ping is disabled or no ping triggered
+    // Tag with ducting risk if monitoring is enabled
+    String? ductingRisk;
+    if (_ductingEnabled) {
+      ductingRisk = await _ductingService.getCurrentRisk(DateTime.now());
+      if (ductingRisk == DuctingRisk.unknown) ductingRisk = null;
+    }
+    
     final sample = Sample(
       id: _generateUniqueId(),
       position: latLng,
@@ -387,6 +443,7 @@ class LocationService {
       rssi: null,
       snr: null,
       pingSuccess: null, // GPS-only sample (no ping attempted)
+      ductingRisk: ductingRisk,
     );
 
     // Save to database
@@ -439,6 +496,13 @@ class LocationService {
         );
       });
       
+      // Tag with ducting risk if monitoring is enabled
+      String? ductingRisk;
+      if (_ductingEnabled) {
+        ductingRisk = await _ductingService.getCurrentRisk(DateTime.now());
+        if (ductingRisk == DuctingRisk.unknown) ductingRisk = null;
+      }
+      
       // Create a new sample with ping results
       final sample = Sample(
         id: _generateUniqueId(),
@@ -450,6 +514,7 @@ class LocationService {
         snr: pingResult.snr,
         pingSuccess: pingSuccess,
         responseTimeMs: pingResult.responseTimeMs,
+        ductingRisk: ductingRisk,
       );
       
       // Save ping result as new sample
@@ -483,6 +548,10 @@ class LocationService {
     
     await _positionStreamSubscription?.cancel();
     _positionStreamSubscription = null;
+    
+    // Stop ducting monitoring
+    _ductingFetchTimer?.cancel();
+    _ductingFetchTimer = null;
     
     // Stop foreground service
     await FlutterForegroundTask.stopService();

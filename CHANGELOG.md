@@ -1,5 +1,57 @@
 # Changelog
 
+## v1.0.32 - 2026-03-25
+
+### ⚠️ IMPORTANT: Reinstall Required
+The APK signing key has changed in this release. Android will reject an in-place update with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. You **must uninstall the previous version** before installing v1.0.32.
+
+**Before updating:**
+1. Open the app and go to **Settings → Export Data** to back up your samples
+2. Uninstall the old version (`adb uninstall mintylinux.meshcore.wardrive` or via Android Settings)
+3. Install v1.0.32
+4. Go to **Settings → Import Data** to restore your samples
+
+### Added
+- **Analytics Screen**: New dedicated analytics hub accessible from Settings → Data Management → Analytics
+  - **Time-of-Day Breakdown**: Bar chart showing ping success rate by hour (0-23)
+    - Color-coded bars: green (>70%), yellow (30-70%), red (<30%)
+    - Best/worst hour summary and period breakdown (morning/afternoon/evening/night)
+  - **Coverage Goal Tracker**: Set a target area and track wardriving progress
+    - Pick center point (current GPS) + radius (1, 5, 10, or 25 miles)
+    - Circular progress ring showing % of geohash cells covered
+    - Breakdown: covered, partial (<30%), uncovered, pings in area
+    - Goal persists between app restarts
+  - **Coverage Comparison**: Compare two wardrive sessions side-by-side
+    - Pick Session A (baseline) and Session B (compare)
+    - Stats with delta arrows: samples, success rate, repeaters, distance
+    - Coverage cell changes: new, lost, improved (>10%), degraded (>10%), unchanged
+  - **Repeater Reliability Scores**: Per-repeater health metrics
+    - Response rate, average response time, consistency score (stddev)
+    - 7-day trend: improving/stable/degrading (compares last 7 days vs prior 7 days)
+    - First/last seen dates, total ping count
+    - Sortable by reliability, response time, or ping count
+- **Atmospheric Ducting Monitor**: Detect anomalous radio propagation conditions
+  - Fetches pressure-level atmospheric data from Open-Meteo API (free, no key)
+  - Computes radio refractivity gradient between surface and 925hPa
+  - Classifies ducting risk: None (normal), Possible (super-refraction), Likely (trapping)
+  - Offline-first: caches hourly data in SQLite, valid for 6 hours without network
+  - Tags each sample with ducting risk level during collection
+  - Color-coded badge in control panel shows live ducting status
+  - Ducting risk shown in sample info popup
+  - Toggle in Settings: "Atmospheric Ducting" (off by default)
+- **Prediction Ring Whitelist**: Coverage prediction rings now respect the "Include Only Repeaters" whitelist filter
+  - When a repeater whitelist is set, only whitelisted repeaters show prediction rings
+- **New App Icon**: Updated launcher icon
+
+### Technical
+- Database version 7 → 8: new `ducting_cache` table, `ducting_risk` column on samples
+- New `DuctingService` with ITU radio refractivity formula and Open-Meteo integration
+- New `AnalyticsScreen` with `fl_chart` bar charts and geohash-based coverage goal math
+- `ductingRisk` field added to `Sample` model (included in JSON/CSV/GPX/KML exports)
+- Coverage goal settings (`goal_center_lat`, `goal_center_lon`, `goal_radius_meters`) in SharedPreferences
+- `LocationService` integrates ducting: fetch on tracking start + hourly timer, runtime toggle
+- `_buildPredictionRingsLayer()` now filters by `_includeOnlyRepeaters` whitelist
+
 ## v1.0.31 - 2026-03-08
 
 ### ⚠️ IMPORTANT: Reinstall Required

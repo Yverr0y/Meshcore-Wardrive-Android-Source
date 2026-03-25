@@ -22,6 +22,10 @@ class SettingsService {
   static const String _showRouteTrailKey = 'show_route_trail';
   static const String _showHeatmapKey = 'show_heatmap';
   static const String _showPredictionRingsKey = 'show_prediction_rings';
+  static const String _showDuctingKey = 'show_ducting';
+  static const String _goalCenterLatKey = 'goal_center_lat';
+  static const String _goalCenterLonKey = 'goal_center_lon';
+  static const String _goalRadiusMetersKey = 'goal_radius_meters';
   
   Future<bool> getShowSamples() async {
     final prefs = await SharedPreferences.getInstance();
@@ -270,5 +274,48 @@ class SettingsService {
   Future<void> setShowPredictionRings(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_showPredictionRingsKey, value);
+  }
+  
+  /// Get show ducting monitor setting
+  Future<bool> getShowDucting() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_showDuctingKey) ?? false;
+  }
+  
+  /// Set show ducting monitor setting
+  Future<void> setShowDucting(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_showDuctingKey, value);
+  }
+  
+  // Coverage goal settings
+  
+  Future<double?> getGoalCenterLat() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_goalCenterLatKey);
+  }
+  
+  Future<double?> getGoalCenterLon() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_goalCenterLonKey);
+  }
+  
+  Future<double> getGoalRadiusMeters() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_goalRadiusMetersKey) ?? 8047.0; // Default 5 miles
+  }
+  
+  Future<void> setGoal(double lat, double lon, double radiusMeters) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_goalCenterLatKey, lat);
+    await prefs.setDouble(_goalCenterLonKey, lon);
+    await prefs.setDouble(_goalRadiusMetersKey, radiusMeters);
+  }
+  
+  Future<void> clearGoal() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_goalCenterLatKey);
+    await prefs.remove(_goalCenterLonKey);
+    await prefs.remove(_goalRadiusMetersKey);
   }
 }
