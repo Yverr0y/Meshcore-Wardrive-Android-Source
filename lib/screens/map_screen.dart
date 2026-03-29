@@ -37,6 +37,7 @@ import 'signal_trend_screen.dart';
 import '../main.dart';
 import '../constants/app_version.dart';
 import '../services/ducting_service.dart';
+import '../services/carpeater_service.dart';
 import 'analytics_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -136,6 +137,14 @@ class _MapScreenState extends State<MapScreen> {
   // Atmospheric ducting
   bool _showDucting = false;
   String _currentDuctingRisk = DuctingRisk.unknown;
+  
+  // Carpeater mode
+  bool _carpeaterEnabled = false;
+  String? _carpeaterRepeaterId;
+  String? _carpeaterPassword;
+  int _carpeaterInterval = 30;
+  CarpeaterState _carpeaterState = CarpeaterState.disabled;
+  StreamSubscription<CarpeaterState>? _carpeaterStateSubscription;
 
   @override
   void initState() {
@@ -160,6 +169,11 @@ class _MapScreenState extends State<MapScreen> {
       setState(() {
         _batteryPercent = percent;
       });
+    });
+    
+    // Subscribe to Carpeater state changes
+    _carpeaterStateSubscription = _locationService.carpeaterService.stateStream.listen((state) {
+      if (mounted) setState(() { _carpeaterState = state; });
     });
     
     // Subscribe to position updates
@@ -269,6 +283,19 @@ class _MapScreenState extends State<MapScreen> {
       _showPredictionRings = showPredictionRings;
       _showDucting = showDucting;
     });
+    
+    // Load Carpeater settings
+    final carpeaterEnabled = await _settingsService.getCarpeaterEnabled();
+    final carpeaterRepeaterId = await _settingsService.getCarpeaterRepeaterId();
+    final carpeaterPassword = await _settingsService.getCarpeaterPassword();
+    final carpeaterInterval = await _settingsService.getCarpeaterInterval();
+    setState(() {
+      _carpeaterEnabled = carpeaterEnabled;
+      _carpeaterRepeaterId = carpeaterRepeaterId;
+      _carpeaterPassword = carpeaterPassword;
+      _carpeaterInterval = carpeaterInterval;
+    });
+    _locationService.setCarpeaterMode(carpeaterEnabled);
     
     // Apply to services
     _locationService.setPingInterval(pingInterval);
@@ -389,8 +416,18 @@ class _MapScreenState extends State<MapScreen> {
       // Start tracking
       final started = await _locationService.startTracking();
       if (started) {
-        // Auto-enable ping if LoRa is connected
-        if (_loraConnected) {
+        // Auto-enable ping or Carpeater if LoRa is connected
+        if (_loraConnected && _carpeaterEnabled) {
+          _locationService.setCarpeaterMode(true);
+          final carpeaterStarted = await _locationService.startCarpeater();
+          setState(() {
+            _isTracking = true;
+            _autoPingEnabled = false;
+          });
+          _showSnackBar(carpeaterStarted
+              ? 'Carpeater mode started'
+              : 'Carpeater failed — check settings');
+        } else if (_loraConnected) {
           _locationService.enableAutoPing();
           setState(() {
             _isTracking = true;
@@ -1442,6 +1479,65 @@ $placemarks  </Document>
                         '${_totalDistance.toStringAsFixed(2)} ${_distanceUnit == 'miles' ? 'mi' : 'km'} • ${_currentSpeed.toStringAsFixed(1)} ${_distanceUnit == 'miles' ? 'mph' : 'km/h'}',
                         style: const TextStyle(fontSize: 10, color: Colors.grey),
                       ),
+                    if (_carpeaterEnabled && _carpeaterState != CarpeaterState.disabled)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: GestureDetector(
+                          onTap: _carpeaterState == CarpeaterState.error
+                              ? () async {
+                                  _showSnackBar('Retrying Carpeater...');
+                                  final ok = await _locationService.startCarpeater();
+                                  _showSnackBar(ok ? 'Carpeater reconnected' : 'Carpeater retry failed');
+                                }
+                              : null,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: (_carpeaterState == CarpeaterState.error
+                                  ? Colors.red
+                                  : _carpeaterState == CarpeaterState.loggedIn ||
+                                    _carpeaterState == CarpeaterState.discovering ||
+                                    _carpeaterState == CarpeaterState.fetchingNeighbours
+                                      ? Colors.green
+                                      : Colors.orange).withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _carpeaterState == CarpeaterState.error
+                                    ? Colors.red
+                                    : _carpeaterState == CarpeaterState.loggedIn ||
+                                      _carpeaterState == CarpeaterState.discovering ||
+                                      _carpeaterState == CarpeaterState.fetchingNeighbours
+                                        ? Colors.green
+                                        : Colors.orange,
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'CP: ${_carpeaterStateLabel()}',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: _carpeaterState == CarpeaterState.error
+                                        ? Colors.red
+                                        : _carpeaterState == CarpeaterState.loggedIn ||
+                                          _carpeaterState == CarpeaterState.discovering ||
+                                          _carpeaterState == CarpeaterState.fetchingNeighbours
+                                            ? Colors.green
+                                            : Colors.orange,
+                                  ),
+                                ),
+                                if (_carpeaterState == CarpeaterState.error) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.refresh, size: 10, color: Colors.red),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     if (_showDucting && _currentDuctingRisk != DuctingRisk.unknown)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
@@ -2089,6 +2185,113 @@ $placemarks  </Document>
                 }
               },
             ),
+            const Divider(),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                'Carpeater Mode',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+            ),
+            SwitchListTile(
+              title: const Text('Enable Carpeater Mode'),
+              subtitle: Text(_carpeaterEnabled
+                  ? 'Using repeater for discovery'
+                  : 'Use a repeater to discover neighbors'),
+              value: _carpeaterEnabled,
+              onChanged: (value) async {
+                setState(() { _carpeaterEnabled = value; });
+                setModalState(() {});
+                await _settingsService.setCarpeaterEnabled(value);
+                _locationService.setCarpeaterMode(value);
+              },
+            ),
+            if (_carpeaterEnabled) ...[
+              ListTile(
+                title: const Text('Target Repeater'),
+                subtitle: Text(_carpeaterRepeaterId ?? 'Not set'),
+                leading: const Icon(Icons.cell_tower),
+                trailing: const Icon(Icons.edit, size: 20),
+                onTap: () async {
+                  final controller = TextEditingController(text: _carpeaterRepeaterId ?? '');
+                  final result = await showDialog<String>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Target Repeater'),
+                      content: TextField(
+                        controller: controller,
+                        decoration: const InputDecoration(
+                          labelText: 'Repeater ID Prefix',
+                          hintText: 'e.g., BAD5DC49',
+                        ),
+                        textCapitalization: TextCapitalization.characters,
+                      ),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                        TextButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Save')),
+                      ],
+                    ),
+                  );
+                  if (result != null) {
+                    setState(() { _carpeaterRepeaterId = result.isEmpty ? null : result; });
+                    setModalState(() {});
+                    await _settingsService.setCarpeaterRepeaterId(result.isEmpty ? null : result);
+                  }
+                },
+              ),
+              ListTile(
+                title: const Text('Admin Password'),
+                subtitle: Text(_carpeaterPassword != null ? '•' * _carpeaterPassword!.length : 'Not set'),
+                leading: const Icon(Icons.lock),
+                trailing: const Icon(Icons.edit, size: 20),
+                onTap: () async {
+                  final controller = TextEditingController(text: _carpeaterPassword ?? '');
+                  final result = await showDialog<String>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Admin Password'),
+                      content: TextField(
+                        controller: controller,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                          hintText: 'Repeater admin password',
+                        ),
+                      ),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                        TextButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Save')),
+                      ],
+                    ),
+                  );
+                  if (result != null) {
+                    setState(() { _carpeaterPassword = result.isEmpty ? null : result; });
+                    setModalState(() {});
+                    await _settingsService.setCarpeaterPassword(result.isEmpty ? null : result);
+                  }
+                },
+              ),
+              ListTile(
+                title: const Text('Discovery Interval'),
+                trailing: DropdownButton<int>(
+                  value: _carpeaterInterval,
+                  items: const [
+                    DropdownMenuItem(value: 5, child: Text('5s')),
+                    DropdownMenuItem(value: 10, child: Text('10s')),
+                    DropdownMenuItem(value: 15, child: Text('15s')),
+                    DropdownMenuItem(value: 30, child: Text('30s')),
+                    DropdownMenuItem(value: 60, child: Text('60s')),
+                    DropdownMenuItem(value: 120, child: Text('2m')),
+                  ],
+                  onChanged: (value) async {
+                    setState(() { _carpeaterInterval = value!; });
+                    setModalState(() {});
+                    await _settingsService.setCarpeaterInterval(value!);
+                  },
+                ),
+              ),
+            ],
+            const Divider(),
             SwitchListTile(
               title: const Text('Lock Map Rotation'),
               subtitle: const Text('Prevent map rotation'),
@@ -2211,6 +2414,7 @@ $placemarks  </Document>
               trailing: DropdownButton<int>(
                 value: _discoveryTimeoutSeconds,
                 items: const [
+                  DropdownMenuItem(value: 5, child: Text('5s')),
                   DropdownMenuItem(value: 10, child: Text('10s')),
                   DropdownMenuItem(value: 15, child: Text('15s')),
                   DropdownMenuItem(value: 20, child: Text('20s')),
@@ -2751,6 +2955,18 @@ $placemarks  </Document>
     if (percent > 30) return Colors.green;
     if (percent > 15) return Colors.orange;
     return Colors.red;
+  }
+  
+  String _carpeaterStateLabel() {
+    switch (_carpeaterState) {
+      case CarpeaterState.disabled: return 'Off';
+      case CarpeaterState.connecting: return 'Connecting';
+      case CarpeaterState.loggingIn: return 'Login...';
+      case CarpeaterState.loggedIn: return 'Ready';
+      case CarpeaterState.discovering: return 'Scanning';
+      case CarpeaterState.fetchingNeighbours: return 'Fetching';
+      case CarpeaterState.error: return 'Error';
+    }
   }
   
   Color _getDuctingColor(String risk) {

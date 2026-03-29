@@ -26,6 +26,10 @@ class SettingsService {
   static const String _goalCenterLatKey = 'goal_center_lat';
   static const String _goalCenterLonKey = 'goal_center_lon';
   static const String _goalRadiusMetersKey = 'goal_radius_meters';
+  static const String _carpeaterEnabledKey = 'carpeater_enabled';
+  static const String _carpeaterRepeaterIdKey = 'carpeater_repeater_id';
+  static const String _carpeaterPasswordKey = 'carpeater_password';
+  static const String _carpeaterIntervalKey = 'carpeater_interval_seconds';
   
   Future<bool> getShowSamples() async {
     final prefs = await SharedPreferences.getInstance();
@@ -317,5 +321,55 @@ class SettingsService {
     await prefs.remove(_goalCenterLatKey);
     await prefs.remove(_goalCenterLonKey);
     await prefs.remove(_goalRadiusMetersKey);
+  }
+  
+  // Carpeater mode settings
+  
+  Future<bool> getCarpeaterEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_carpeaterEnabledKey) ?? false;
+  }
+  
+  Future<void> setCarpeaterEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_carpeaterEnabledKey, value);
+  }
+  
+  Future<String?> getCarpeaterRepeaterId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_carpeaterRepeaterIdKey);
+  }
+  
+  Future<void> setCarpeaterRepeaterId(String? value) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (value == null || value.isEmpty) {
+      await prefs.remove(_carpeaterRepeaterIdKey);
+    } else {
+      await prefs.setString(_carpeaterRepeaterIdKey, value);
+    }
+  }
+  
+  Future<String?> getCarpeaterPassword() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_carpeaterPasswordKey);
+  }
+  
+  Future<void> setCarpeaterPassword(String? value) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (value == null || value.isEmpty) {
+      await prefs.remove(_carpeaterPasswordKey);
+    } else {
+      await prefs.setString(_carpeaterPasswordKey, value);
+    }
+  }
+  
+  Future<int> getCarpeaterInterval() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_carpeaterIntervalKey) ?? 30;
+  }
+  
+  Future<void> setCarpeaterInterval(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_carpeaterIntervalKey, value);
   }
 }

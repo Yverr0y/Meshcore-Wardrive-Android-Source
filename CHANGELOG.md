@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.0.33 - 2026-03-29
+
+### Added
+- **Carpeater Mode** (contributed by @overkillfpv): "Car Repeater" wardrive mode
+  - Instead of pinging directly, log into a target repeater and use it to discover neighbors
+  - Configure target repeater ID, admin password, and discovery interval in Settings
+  - Automatic login with 3x retry, discovery cycle with neighbour table clear/fetch
+  - GPS position snapshotted at moment of discovery for accurate geotagging
+  - Each discovered neighbour saved as a sample with SNR data
+  - Empty responses recorded as dead zones (failed samples)
+  - Auto-reconnect after 3 consecutive failed cycles
+  - Discovery wait respects stop signal (no 30s hang on stop)
+  - Status badge in control panel showing Carpeater state
+  - Password field uses obscured text input
+  - Auto-ping suppressed when Carpeater mode is active
+- **Fixed App Icon**: Cropped to proper 1024x1024 square from banner image
+
+### Technical
+- New `CarpeaterService` with state machine, retry logic, and cycle tracking
+- Extended `MeshCoreProtocol` with Carpeater commands: login, CLI, binary request, neighbour parsing
+- Extended `LoRaCompanionService` with pubkey cache, Carpeater callback routing, and send methods
+- Updated push code constants to match current MeshCore firmware (with legacy aliases for compatibility)
+- `LocationService` integrates Carpeater alongside existing ducting monitoring
+- Carpeater settings persisted via SharedPreferences
+
 ## v1.0.32 - 2026-03-25
 
 ### ⚠️ IMPORTANT: Reinstall Required

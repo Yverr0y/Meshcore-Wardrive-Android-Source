@@ -15,6 +15,7 @@ import 'persistent_debug_logger.dart';
 import 'settings_service.dart';
 import 'widget_service.dart';
 import 'ducting_service.dart';
+import 'carpeater_service.dart';
 
 class LocationService {
   final DatabaseService _dbService = DatabaseService();
@@ -22,6 +23,10 @@ class LocationService {
   final PersistentDebugLogger _logger = PersistentDebugLogger();
   final SettingsService _settings = SettingsService();
   final DuctingService _ductingService = DuctingService();
+  
+  LocationService() {
+    _carpeaterService = CarpeaterService(_loraCompanion, _settings);
+  }
   StreamSubscription<Position>? _positionStreamSubscription;
   bool _isTracking = false;
   bool _autoPingEnabled = false;
@@ -63,8 +68,18 @@ class LocationService {
   bool _ductingEnabled = false;
   Timer? _ductingFetchTimer;
   
+  // Carpeater mode
+  late final CarpeaterService _carpeaterService;
+  bool _carpeaterModeEnabled = false;
+  StreamSubscription<List<Map<String, dynamic>>>? _carpeaterNeighboursSubscription;
+  StreamSubscription<void>? _carpeaterDiscoveryStartedSubscription;
+  LatLng? _carpeaterDiscoveryPosition; // GPS snapshot at moment of discovery
+  
   /// Get ducting service for UI access
   DuctingService get ductingService => _ductingService;
+  
+  /// Get carpeater service for UI access
+  CarpeaterService get carpeaterService => _carpeaterService;
   
   /// Enable or disable ducting monitoring at runtime
   void setDuctingEnabled(bool enabled) {
@@ -84,6 +99,12 @@ class LocationService {
       _ductingFetchTimer?.cancel();
       _ductingFetchTimer = null;
     }
+  }
+  
+  /// Enable or disable Carpeater mode at runtime
+  void setCarpeaterMode(bool enabled) {
+    _carpeaterModeEnabled = enabled;
+    _logger.logServiceEvent('Carpeater mode ${enabled ? "enabled" : "disabled"}');
   }
 
   /// Check if location permissions are granted
@@ -383,7 +404,7 @@ class LocationService {
       await _logger.logPingEvent('Checking ping condition: autoPing=$_autoPingEnabled, deviceConnected=$isConnected, lastPingPos=${_lastPingPosition != null ? "set" : "null"}');
     }
     
-    if (_autoPingEnabled && isConnected) {
+    if (_autoPingEnabled && isConnected && !_carpeaterModeEnabled) {
       bool shouldPing = false;
       
       if (_lastPingPosition == null) {
@@ -553,6 +574,11 @@ class LocationService {
     _ductingFetchTimer?.cancel();
     _ductingFetchTimer = null;
     
+    // Stop Carpeater mode
+    _carpeaterNeighboursSubscription?.cancel();
+    _carpeaterDiscoveryStartedSubscription?.cancel();
+    _carpeaterService.stop();
+    
     // Stop foreground service
     await FlutterForegroundTask.stopService();
     await _logger.logServiceEvent('Foreground service stopped');
@@ -628,6 +654,92 @@ class LocationService {
     return '${timestamp}_$random';
   }
 
+  /// Start Carpeater discovery and subscribe to results
+  Future<bool> startCarpeater() async {
+    // Subscribe to discovery started (snapshot GPS position)
+    _carpeaterDiscoveryStartedSubscription = _carpeaterService.discoveryStartedStream.listen((_) {
+      _carpeaterDiscoveryPosition = _lastPosition;
+      _pingEventController.add('pinging');
+    });
+    
+    // Subscribe to neighbour results
+    _carpeaterNeighboursSubscription = _carpeaterService.neighboursStream.listen(_onCarpeaterNeighbours);
+    
+    final started = await _carpeaterService.start();
+    if (!started) {
+      _carpeaterDiscoveryStartedSubscription?.cancel();
+      _carpeaterNeighboursSubscription?.cancel();
+    }
+    return started;
+  }
+  
+  /// Handle Carpeater neighbour results — save as samples
+  void _onCarpeaterNeighbours(List<Map<String, dynamic>> neighbours) async {
+    final position = _carpeaterDiscoveryPosition ?? _lastPosition;
+    if (position == null) return;
+    
+    final geohash = GeohashUtils.sampleKey(position.latitude, position.longitude);
+    
+    // Get ducting risk if enabled
+    String? ductingRisk;
+    if (_ductingEnabled) {
+      ductingRisk = await _ductingService.getCurrentRisk(DateTime.now());
+      if (ductingRisk == DuctingRisk.unknown) ductingRisk = null;
+    }
+    
+    if (neighbours.isEmpty) {
+      // Dead zone — repeater heard nobody
+      final sample = Sample(
+        id: _generateUniqueId(),
+        position: position,
+        timestamp: DateTime.now(),
+        path: _carpeaterService.targetRepeaterId,
+        geohash: geohash,
+        pingSuccess: false,
+        ductingRisk: ductingRisk,
+      );
+      await _dbService.insertSample(sample);
+      _pingEventController.add('failed');
+    } else {
+      // Save one sample per neighbour
+      for (final n in neighbours) {
+        final pubkey = n['pubkey'] as String?;
+        final snr = (n['snr'] as num?)?.toInt();
+        final repeaterId = pubkey != null && pubkey.length >= 8
+            ? pubkey.substring(0, 8)
+            : pubkey;
+        
+        final sample = Sample(
+          id: _generateUniqueId(),
+          position: position,
+          timestamp: DateTime.now(),
+          path: repeaterId,
+          geohash: geohash,
+          snr: snr,
+          pingSuccess: true,
+          ductingRisk: ductingRisk,
+        );
+        await _dbService.insertSample(sample);
+      }
+      _pingEventController.add('success');
+    }
+    
+    _sampleSavedController.add(null);
+    
+    FlutterForegroundTask.updateService(
+      notificationTitle: 'MeshCore Wardrive',
+      notificationText: neighbours.isEmpty
+          ? 'Carpeater: No neighbours'
+          : 'Carpeater: ${neighbours.length} neighbours found',
+    );
+    Future.delayed(const Duration(seconds: 3), () {
+      FlutterForegroundTask.updateService(
+        notificationTitle: 'MeshCore Wardrive',
+        notificationText: 'Carpeater mode active',
+      );
+    });
+  }
+
   /// Dispose resources
   void dispose() {
     stopTracking();
@@ -637,6 +749,9 @@ class LocationService {
     _pingEventController.close();
     _totalDistanceController.close();
     _speedController.close();
+    _carpeaterNeighboursSubscription?.cancel();
+    _carpeaterDiscoveryStartedSubscription?.cancel();
+    _carpeaterService.dispose();
     _loraCompanion.dispose();
   }
 }
