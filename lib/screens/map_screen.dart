@@ -38,6 +38,8 @@ import '../main.dart';
 import '../constants/app_version.dart';
 import '../services/ducting_service.dart';
 import '../services/carpeater_service.dart';
+import '../services/sound_service.dart';
+import '../services/tile_download_service.dart';
 import 'analytics_screen.dart';
 
 class MapScreen extends StatefulWidget {
@@ -137,6 +139,14 @@ class _MapScreenState extends State<MapScreen> {
   // Atmospheric ducting
   bool _showDucting = false;
   String _currentDuctingRisk = DuctingRisk.unknown;
+  
+  // Sound & vibration feedback
+  bool _soundEnabled = false;
+  bool _vibrationEnabled = false;
+  
+  // Ping mode
+  String _pingMode = 'distance';
+  int _pingTimeInterval = 60;
   
   // Carpeater mode
   bool _carpeaterEnabled = false;
@@ -283,6 +293,26 @@ class _MapScreenState extends State<MapScreen> {
       _showPredictionRings = showPredictionRings;
       _showDucting = showDucting;
     });
+    
+    // Load ping mode settings
+    final pingMode = await _settingsService.getPingMode();
+    final pingTimeInterval = await _settingsService.getPingTimeInterval();
+    setState(() {
+      _pingMode = pingMode;
+      _pingTimeInterval = pingTimeInterval;
+    });
+    _locationService.setPingMode(pingMode);
+    _locationService.setPingTimeInterval(pingTimeInterval);
+    
+    // Load sound & vibration settings
+    final soundEnabled = await _settingsService.getSoundEnabled();
+    final vibrationEnabled = await _settingsService.getVibrationEnabled();
+    setState(() {
+      _soundEnabled = soundEnabled;
+      _vibrationEnabled = vibrationEnabled;
+    });
+    SoundService().setEnabled(soundEnabled);
+    SoundService().setVibrationEnabled(vibrationEnabled);
     
     // Load Carpeater settings
     final carpeaterEnabled = await _settingsService.getCarpeaterEnabled();
@@ -2185,6 +2215,28 @@ $placemarks  </Document>
                 }
               },
             ),
+            SwitchListTile(
+              title: const Text('Sound Feedback'),
+              subtitle: const Text('Play tones on ping results'),
+              value: _soundEnabled,
+              onChanged: (value) async {
+                setState(() { _soundEnabled = value; });
+                setModalState(() {});
+                await _settingsService.setSoundEnabled(value);
+                SoundService().setEnabled(value);
+              },
+            ),
+            SwitchListTile(
+              title: const Text('Vibration Feedback'),
+              subtitle: const Text('Haptic feedback on ping results'),
+              value: _vibrationEnabled,
+              onChanged: (value) async {
+                setState(() { _vibrationEnabled = value; });
+                setModalState(() {});
+                await _settingsService.setVibrationEnabled(value);
+                SoundService().setVibrationEnabled(value);
+              },
+            ),
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2465,14 +2517,52 @@ $placemarks  </Document>
               },
             ),
             ListTile(
-              title: const Text('Ping Interval'),
-              subtitle: Text(_getPingIntervalDescription()),
-              trailing: const Icon(Icons.tune),
-              onTap: () {
-                Navigator.pop(context);
-                _setPingInterval();
-              },
+              title: const Text('Ping Mode'),
+              trailing: DropdownButton<String>(
+                value: _pingMode,
+                items: const [
+                  DropdownMenuItem(value: 'distance', child: Text('Distance')),
+                  DropdownMenuItem(value: 'time', child: Text('Time')),
+                  DropdownMenuItem(value: 'both', child: Text('Both')),
+                ],
+                onChanged: (value) async {
+                  setState(() { _pingMode = value!; });
+                  setModalState(() {});
+                  await _settingsService.setPingMode(value!);
+                  _locationService.setPingMode(value!);
+                },
+              ),
             ),
+            if (_pingMode != 'time')
+              ListTile(
+                title: const Text('Ping Distance'),
+                subtitle: Text(_getPingIntervalDescription()),
+                trailing: const Icon(Icons.tune),
+                onTap: () {
+                  Navigator.pop(context);
+                  _setPingInterval();
+                },
+              ),
+            if (_pingMode != 'distance')
+              ListTile(
+                title: const Text('Ping Time Interval'),
+                trailing: DropdownButton<int>(
+                  value: _pingTimeInterval,
+                  items: const [
+                    DropdownMenuItem(value: 15, child: Text('15s')),
+                    DropdownMenuItem(value: 30, child: Text('30s')),
+                    DropdownMenuItem(value: 60, child: Text('60s')),
+                    DropdownMenuItem(value: 120, child: Text('2m')),
+                    DropdownMenuItem(value: 300, child: Text('5m')),
+                  ],
+                  onChanged: (value) async {
+                    setState(() { _pingTimeInterval = value!; });
+                    setModalState(() {});
+                    await _settingsService.setPingTimeInterval(value!);
+                    _locationService.setPingTimeInterval(value!);
+                  },
+                ),
+              ),
             ListTile(
               title: const Text('Coverage Resolution'),
               subtitle: Text(_getCoverageResolutionDescription()),
@@ -2798,6 +2888,15 @@ $placemarks  </Document>
               onTap: () {
                 Navigator.pop(context);
                 _clearData();
+              },
+            ),
+            ListTile(
+              title: const Text('Download Offline Tiles'),
+              subtitle: const Text('Cache map tiles for current view'),
+              leading: const Icon(Icons.download_for_offline),
+              onTap: () {
+                Navigator.pop(context);
+                _showOfflineTileDownload();
               },
             ),
             ListTile(
@@ -3728,6 +3827,174 @@ $placemarks  </Document>
           ),
         ),
       ),
+    );
+  }
+  
+  Future<void> _showOfflineTileDownload() async {
+    if (_tileCacheStore == null) {
+      _showSnackBar('Tile cache not initialized');
+      return;
+    }
+    
+    final bounds = _mapController.camera.visibleBounds;
+    final currentZoom = _mapController.camera.zoom.floor();
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
+    int minZoom = currentZoom;
+    int maxZoom = (currentZoom + 3).clamp(0, 18);
+    
+    final result = await showDialog<Map<String, int>>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final tileCount = TileDownloadService.estimateTileCount(
+              bounds.southWest,
+              bounds.northEast,
+              minZoom,
+              maxZoom,
+            );
+            final estimatedMB = (tileCount * 15 / 1024).toStringAsFixed(1); // ~15KB per tile
+            
+            return AlertDialog(
+              title: const Text('Download Offline Tiles'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Download map tiles for the current view area.'),
+                  const SizedBox(height: 16),
+                  Text('Min Zoom: $minZoom'),
+                  Slider(
+                    value: minZoom.toDouble(),
+                    min: 3,
+                    max: 18,
+                    divisions: 15,
+                    label: '$minZoom',
+                    onChanged: (v) {
+                      setDialogState(() {
+                        minZoom = v.round();
+                        if (maxZoom < minZoom) maxZoom = minZoom;
+                      });
+                    },
+                  ),
+                  Text('Max Zoom: $maxZoom'),
+                  Slider(
+                    value: maxZoom.toDouble(),
+                    min: 3,
+                    max: 18,
+                    divisions: 15,
+                    label: '$maxZoom',
+                    onChanged: (v) {
+                      setDialogState(() {
+                        maxZoom = v.round();
+                        if (minZoom > maxZoom) minZoom = maxZoom;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$tileCount tiles (~$estimatedMB MB)',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  if (tileCount > 5000)
+                    const Text(
+                      'Large download — consider a smaller area or zoom range',
+                      style: TextStyle(color: Colors.orange, fontSize: 12),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, {
+                    'minZoom': minZoom,
+                    'maxZoom': maxZoom,
+                  }),
+                  child: const Text('Download'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    
+    if (result == null || !mounted) return;
+    
+    final urlTemplate = isDarkMode
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+        : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    
+    final cacheDir = (await getApplicationDocumentsDirectory()).path + '/tile_cache';
+    final downloader = TileDownloadService(cacheDir);
+    final totalTiles = TileDownloadService.estimateTileCount(
+      bounds.southWest,
+      bounds.northEast,
+      result['minZoom']!,
+      result['maxZoom']!,
+    );
+    
+    // Show progress dialog
+    bool downloadCancelled = false;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        int completed = 0;
+        return StatefulBuilder(
+          builder: (context, setProgressState) {
+            // Start download on first build
+            if (completed == 0) {
+              downloader.downloadTiles(
+                sw: bounds.southWest,
+                ne: bounds.northEast,
+                minZoom: result['minZoom']!,
+                maxZoom: result['maxZoom']!,
+                urlTemplate: urlTemplate,
+                onProgress: (done, total) {
+                  if (context.mounted) {
+                    setProgressState(() { completed = done; });
+                  }
+                },
+              ).then((succeeded) {
+                if (context.mounted) Navigator.pop(context);
+                if (!downloadCancelled) {
+                  _showSnackBar('Downloaded $succeeded/$totalTiles tiles');
+                }
+              });
+            }
+            
+            final progress = totalTiles > 0 ? completed / totalTiles : 0.0;
+            
+            return AlertDialog(
+              title: const Text('Downloading Tiles'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  LinearProgressIndicator(value: progress),
+                  const SizedBox(height: 12),
+                  Text('$completed / $totalTiles tiles'),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    downloadCancelled = true;
+                    downloader.cancel();
+                    Navigator.pop(context);
+                    _showSnackBar('Download cancelled ($completed tiles cached)');
+                  },
+                  child: const Text('Cancel'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
   

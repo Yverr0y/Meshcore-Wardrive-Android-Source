@@ -311,7 +311,9 @@ class CarpeaterService {
       _discoveryStartedController.add(null);
       
       // Step 3: Wait for responses (respects stop signal)
-      const discoveryWaitSeconds = 30;
+      // v1.14+ repeaters handle discover.neighbors natively via zero-hop adverts,
+      // so responses arrive within a few seconds of LoRa airtime.
+      const discoveryWaitSeconds = 8;
       _debugLog.logInfo('Carpeater: Waiting ${discoveryWaitSeconds}s for responses...');
       await Future.any([
         Future.delayed(const Duration(seconds: discoveryWaitSeconds)),

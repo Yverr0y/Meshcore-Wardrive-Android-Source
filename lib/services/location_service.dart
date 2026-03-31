@@ -16,6 +16,7 @@ import 'settings_service.dart';
 import 'widget_service.dart';
 import 'ducting_service.dart';
 import 'carpeater_service.dart';
+import 'sound_service.dart';
 
 class LocationService {
   final DatabaseService _dbService = DatabaseService();
@@ -23,6 +24,7 @@ class LocationService {
   final PersistentDebugLogger _logger = PersistentDebugLogger();
   final SettingsService _settings = SettingsService();
   final DuctingService _ductingService = DuctingService();
+  final SoundService _soundService = SoundService();
   
   LocationService() {
     _carpeaterService = CarpeaterService(_loraCompanion, _settings);
@@ -32,6 +34,12 @@ class LocationService {
   bool _autoPingEnabled = false;
   double _pingIntervalMeters = 805.0; // Default 0.5 miles
   LatLng? _lastPingPosition;
+  
+  // Ping mode: 'distance', 'time', or 'both'
+  String _pingMode = 'distance';
+  int _pingTimeIntervalSeconds = 60;
+  Timer? _timePingTimer;
+  bool _pingInProgress = false; // Guard against overlapping pings
   
   // Distance tracking
   double _totalDistanceMeters = 0.0;
@@ -323,7 +331,8 @@ class LocationService {
     
     if (isConnected) {
       _autoPingEnabled = true;
-      _logger.logPingEvent('Auto-ping enabled (interval: ${_pingIntervalMeters}m)');
+      _logger.logPingEvent('Auto-ping enabled (mode: $_pingMode, distance: ${_pingIntervalMeters}m, time: ${_pingTimeIntervalSeconds}s)');
+      _restartTimePingTimer();
     } else {
       _logger.logPingEvent('Auto-ping enable FAILED - no device connected');
     }
@@ -332,6 +341,8 @@ class LocationService {
   /// Disable auto-ping
   void disableAutoPing() {
     _autoPingEnabled = false;
+    _timePingTimer?.cancel();
+    _timePingTimer = null;
     _logger.logPingEvent('Auto-ping disabled');
   }
 
@@ -349,6 +360,70 @@ class LocationService {
   
   /// Get current ping interval in meters
   double get pingIntervalMeters => _pingIntervalMeters;
+  
+  /// Set ping mode ('distance', 'time', or 'both')
+  void setPingMode(String mode) {
+    _pingMode = mode;
+    _logger.logPingEvent('Ping mode set to: $mode');
+    _restartTimePingTimer();
+  }
+  
+  /// Get current ping mode
+  String get pingMode => _pingMode;
+  
+  /// Set ping time interval in seconds
+  void setPingTimeInterval(int seconds) {
+    _pingTimeIntervalSeconds = seconds;
+    _logger.logPingEvent('Ping time interval set to: ${seconds}s');
+    _restartTimePingTimer();
+  }
+  
+  /// Get current ping time interval in seconds
+  int get pingTimeIntervalSeconds => _pingTimeIntervalSeconds;
+  
+  /// Start or restart the time-based ping timer
+  void _restartTimePingTimer() {
+    _timePingTimer?.cancel();
+    _timePingTimer = null;
+    
+    if (!_isTracking || !_autoPingEnabled || _carpeaterModeEnabled) return;
+    if (_pingMode == 'distance') return; // No timer needed for distance-only mode
+    
+    _timePingTimer = Timer.periodic(
+      Duration(seconds: _pingTimeIntervalSeconds),
+      (_) => _handleTimePing(),
+    );
+    _logger.logPingEvent('Time-based ping timer started (${_pingTimeIntervalSeconds}s)');
+  }
+  
+  /// Handle a time-triggered ping
+  void _handleTimePing() async {
+    if (!_autoPingEnabled || _carpeaterModeEnabled || _pingInProgress) return;
+    if (!_loraCompanion.isDeviceConnected) return;
+    
+    final position = _lastPosition;
+    if (position == null) return;
+    
+    // For 'both' mode, skip if distance threshold was recently met
+    // (the distance ping already covered this location)
+    // We always ping on time to handle stationary scenarios
+    
+    _pingInProgress = true;
+    _lastPingPosition = position;
+    
+    final geohash = GeohashUtils.sampleKey(position.latitude, position.longitude);
+    await _logger.logPingEvent('Time-based ping triggered at ${position.latitude}, ${position.longitude}');
+    
+    _pingEventController.add('pinging');
+    _soundService.playPingSent();
+    
+    FlutterForegroundTask.updateService(
+      notificationTitle: 'MeshCore Wardrive',
+      notificationText: 'Pinging...',
+    );
+    
+    _performPingInBackground(position, geohash);
+  }
   
   /// Get total distance traveled in meters
   double get totalDistanceMeters => _totalDistanceMeters;
@@ -404,7 +479,7 @@ class LocationService {
       await _logger.logPingEvent('Checking ping condition: autoPing=$_autoPingEnabled, deviceConnected=$isConnected, lastPingPos=${_lastPingPosition != null ? "set" : "null"}');
     }
     
-    if (_autoPingEnabled && isConnected && !_carpeaterModeEnabled) {
+    if (_autoPingEnabled && isConnected && !_carpeaterModeEnabled && _pingMode != 'time') {
       bool shouldPing = false;
       
       if (_lastPingPosition == null) {
@@ -426,13 +501,15 @@ class LocationService {
         }
       }
       
-      if (shouldPing) {
+      if (shouldPing && !_pingInProgress) {
         // Update last ping position immediately to prevent multiple pings
+        _pingInProgress = true;
         _lastPingPosition = latLng;
-        await _logger.logPingEvent('Auto-ping triggered at ${latLng.latitude}, ${latLng.longitude}');
+        await _logger.logPingEvent('Distance-based ping triggered at ${latLng.latitude}, ${latLng.longitude}');
         
         // Notify UI that ping is starting
         _pingEventController.add('pinging');
+        _soundService.playPingSent();
         
         // Update foreground notification
         FlutterForegroundTask.updateService(
@@ -496,6 +573,13 @@ class LocationService {
       await _logger.logPingEvent('Ping result: ${pingResult.status.name}, Node: $nodeId, RSSI: ${pingResult.rssi}, SNR: ${pingResult.snr}');
       print('Ping complete: ${pingResult.status.name}, Node: $nodeId, RSSI: ${pingResult.rssi}, SNR: ${pingResult.snr}');
       
+      // Sound feedback based on result quality
+      _soundService.playForPingResult(
+        success: pingSuccess,
+        snr: pingResult.snr,
+        rssi: pingResult.rssi,
+      );
+      
       // Update notification with result
       final shortId = (nodeId != null && nodeId.isNotEmpty)
           ? (nodeId.length > 8 ? nodeId.substring(0, 8).toUpperCase() : nodeId.toUpperCase())
@@ -543,6 +627,7 @@ class LocationService {
       print('Saved ping result: ${sample.id}');
       // Notify listeners
       _sampleSavedController.add(null);
+      _pingInProgress = false;
     } catch (e) {
       await _logger.logError('Background Ping', e.toString());
       print('Error during background ping: $e');
@@ -560,6 +645,7 @@ class LocationService {
       await _dbService.insertSample(sample);
       // Notify listeners
       _sampleSavedController.add(null);
+      _pingInProgress = false;
     }
   }
 
@@ -573,6 +659,10 @@ class LocationService {
     // Stop ducting monitoring
     _ductingFetchTimer?.cancel();
     _ductingFetchTimer = null;
+    
+    // Stop time-based ping timer
+    _timePingTimer?.cancel();
+    _timePingTimer = null;
     
     // Stop Carpeater mode
     _carpeaterNeighboursSubscription?.cancel();
@@ -660,6 +750,7 @@ class LocationService {
     _carpeaterDiscoveryStartedSubscription = _carpeaterService.discoveryStartedStream.listen((_) {
       _carpeaterDiscoveryPosition = _lastPosition;
       _pingEventController.add('pinging');
+      _soundService.playPingSent();
     });
     
     // Subscribe to neighbour results
@@ -700,6 +791,7 @@ class LocationService {
       );
       await _dbService.insertSample(sample);
       _pingEventController.add('failed');
+      _soundService.playPingFailed();
     } else {
       // Save one sample per neighbour
       for (final n in neighbours) {
@@ -722,6 +814,12 @@ class LocationService {
         await _dbService.insertSample(sample);
       }
       _pingEventController.add('success');
+      // Use best SNR from neighbours for sound quality
+      final bestSnr = neighbours
+          .map((n) => (n['snr'] as num?)?.toInt())
+          .where((s) => s != null)
+          .fold<int?>(null, (best, s) => best == null || s! > best ? s : best);
+      _soundService.playForPingResult(success: true, snr: bestSnr);
     }
     
     _sampleSavedController.add(null);

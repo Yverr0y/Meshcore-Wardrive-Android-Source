@@ -26,6 +26,10 @@ class SettingsService {
   static const String _goalCenterLatKey = 'goal_center_lat';
   static const String _goalCenterLonKey = 'goal_center_lon';
   static const String _goalRadiusMetersKey = 'goal_radius_meters';
+  static const String _soundEnabledKey = 'sound_enabled';
+  static const String _vibrationEnabledKey = 'vibration_enabled';
+  static const String _pingModeKey = 'ping_mode';
+  static const String _pingTimeIntervalKey = 'ping_time_interval_seconds';
   static const String _carpeaterEnabledKey = 'carpeater_enabled';
   static const String _carpeaterRepeaterIdKey = 'carpeater_repeater_id';
   static const String _carpeaterPasswordKey = 'carpeater_password';
@@ -323,7 +327,51 @@ class SettingsService {
     await prefs.remove(_goalRadiusMetersKey);
   }
   
-  // Carpeater mode settings
+  // Ping mode: 'distance', 'time', or 'both'
+  
+  Future<String> getPingMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_pingModeKey) ?? 'distance';
+  }
+  
+  Future<void> setPingMode(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_pingModeKey, value);
+  }
+  
+  Future<int> getPingTimeInterval() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_pingTimeIntervalKey) ?? 60;
+  }
+  
+  Future<void> setPingTimeInterval(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_pingTimeIntervalKey, value);
+  }
+  
+  // Sound feedback
+  
+  Future<bool> getSoundEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_soundEnabledKey) ?? false;
+  }
+  
+  Future<void> setSoundEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_soundEnabledKey, value);
+  }
+  
+  Future<bool> getVibrationEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_vibrationEnabledKey) ?? false;
+  }
+  
+  Future<void> setVibrationEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_vibrationEnabledKey, value);
+  }
+  
+  // Ping mode:
   
   Future<bool> getCarpeaterEnabled() async {
     final prefs = await SharedPreferences.getInstance();
