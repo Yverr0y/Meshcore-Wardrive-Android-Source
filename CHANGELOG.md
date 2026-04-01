@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.0.34 - 2026-04-01
+
+### Added
+- **Sound Feedback**: System tones on ping sent, success (good/weak signal), and failure (toggleable in Settings)
+- **Vibration Feedback**: Haptic patterns for ping results with Android S+ compatibility (toggleable in Settings)
+- **Native Android Feedback**: Platform channel for ToneGenerator-based tones and Vibrator-based haptics
+- **Ping-by-Time Mode**: New ping trigger options — distance, time, or both (whichever threshold hits first)
+- **Faster Carpeater Mode**: Reduced discovery wait from 30s to 8s for v1.14+ repeaters
+- **Offline Map Tile Downloads**: Download tiles for current view area with zoom range picker
+- **Disconnect Stream**: LoRaCompanionService exposes disconnect events for USB and Bluetooth
+- **Auto-Ping Auto-Disable**: Auto-ping and Carpeater automatically stop on device disconnect
+
+### Improved
+- Sound and vibration feedback enabled by default
+- Carpeater service hardened: safer stop logic, `_isStopped` guard, improved retry counts and delays
+- Map screen performance: conditional re-aggregation only when sample/repeater counts change, repeater deduplication
+- Upload service refactored: extracted `_samplesToJson` helper, cleaner JSON construction
+
+### Technical
+- New `SoundService` with platform channel (`mintylinux.wardrive/feedback`) for native audio/haptic feedback
+- New `TileDownloadService` for offline tile management
+- Added `VIBRATE` permission to AndroidManifest
+- Protocol constant renamed: `CMD_SET_POSITION` → `CMD_SET_ADVERT_LATLON`
+- `MainActivity.kt` extended with ToneGenerator and Vibrator support
+
 ## v1.0.33 - 2026-03-29
 
 ### Added

@@ -83,6 +83,7 @@ class LoRaCompanionService {
   // Track recent advertisements for echo correlation
   final Map<String, DateTime> _recentAdvertisements = {}; // repeaterId -> last seen time
   final Duration _advertCorrelationWindow = const Duration(minutes: 5); // Window for correlating adverts with echoes
+  DateTime _lastAdvertCleanup = DateTime.now();
   
   // Throttle contact lookups to avoid dumping full list repeatedly
   final Map<String, DateTime> _lastContactRequestAt = {}; // keyPrefix -> time
@@ -311,9 +312,19 @@ class LoRaCompanionService {
         UsbPort.PARITY_NONE,
       );
 
-      _deviceSubscription = _usbPort!.inputStream?.listen((data) {
-        _handleDeviceData(Uint8List.fromList(data));
-      });
+    _deviceSubscription = _usbPort!.inputStream?.listen(
+        (data) {
+          _handleDeviceData(Uint8List.fromList(data));
+        },
+        onError: (error) {
+          print('⚠️ USB stream error: $error');
+          _handleUsbDisconnection();
+        },
+        onDone: () {
+          print('⚠️ USB stream closed');
+          _handleUsbDisconnection();
+        },
+      );
 
       _connectionType = ConnectionType.usb;
       print('Connected to LoRa device via USB');
@@ -547,7 +558,7 @@ class LoRaCompanionService {
   Future<void> _updateDevicePosition(double latitude, double longitude) async {
     try {
       final posPayload = _protocol.createPositionPayload(latitude, longitude);
-      final posCmd = _createCommandForDevice(CMD_SET_POSITION, posPayload);
+      final posCmd = _createCommandForDevice(CMD_SET_ADVERT_LATLON, posPayload);
       await _sendBinaryToDevice(posCmd);
       _debugLog.logInfo('📍 Updated device position: $latitude, $longitude');
     } catch (e) {
@@ -582,14 +593,13 @@ class LoRaCompanionService {
       );
     }
     
-    // Check rate limiting - don't ping too frequently
+    // Enforce rate limiting - don't ping too frequently
     if (_lastPingTime != null) {
       final timeSinceLastPing = DateTime.now().difference(_lastPingTime!);
       if (timeSinceLastPing < _minPingInterval) {
-        final waitSeconds = (_minPingInterval - timeSinceLastPing).inSeconds;
-        _debugLog.logInfo('⏳ Rate limit: wait ${waitSeconds}s before next ping');
-        print('⏳ Waiting ${waitSeconds}s to avoid rate limits...');
-        // Still allow the ping but warn the user
+        final waitTime = _minPingInterval - timeSinceLastPing;
+        _debugLog.logInfo('⏳ Rate limit: waiting ${waitTime.inSeconds}s before ping');
+        await Future.delayed(waitTime);
       }
     }
 
@@ -819,6 +829,13 @@ class LoRaCompanionService {
     
     // Track this advertisement for echo correlation
     _recentAdvertisements[keyPrefix] = DateTime.now();
+    
+    // Periodic cleanup of stale advertisement entries (every 5 minutes)
+    final now = DateTime.now();
+    if (now.difference(_lastAdvertCleanup) > _advertCorrelationWindow) {
+      _recentAdvertisements.removeWhere((_, time) => now.difference(time) > _advertCorrelationWindow);
+      _lastAdvertCleanup = now;
+    }
     
     // Do not request contacts on adverts to avoid full list dumps.
     // We already load contacts on connect or when user scans.
@@ -1242,6 +1259,40 @@ class LoRaCompanionService {
   // DISCONNECT
   // ============================================================================
 
+  // Stream for broadcasting disconnect events
+  final _disconnectController = StreamController<void>.broadcast();
+  Stream<void> get disconnectStream => _disconnectController.stream;
+
+  /// Handle unexpected USB disconnection
+  void _handleUsbDisconnection() {
+    if (_connectionType != ConnectionType.usb) return;
+    print('⚠️ USB device disconnected');
+    _debugLog.logError('USB disconnected');
+    
+    _stopBatteryMonitoring();
+    _deviceSubscription?.cancel();
+    
+    _usbPort = null;
+    _connectionType = ConnectionType.none;
+    _deviceName = null;
+    
+    // Fail any pending pings
+    for (final entry in _pendingPings.entries) {
+      if (!entry.value.isCompleted) {
+        entry.value.complete(PingResult(
+          timestamp: DateTime.now(),
+          status: PingStatus.failed,
+          error: 'USB connection lost',
+        ));
+      }
+    }
+    _pendingPings.clear();
+    _pingResponses.clear();
+    
+    // Notify listeners of disconnect
+    _disconnectController.add(null);
+  }
+
   /// Handle unexpected Bluetooth disconnection
   void _handleBluetoothDisconnection() {
     print('⚠️ Bluetooth device disconnected unexpectedly');
@@ -1269,6 +1320,9 @@ class LoRaCompanionService {
     }
     _pendingPings.clear();
     _pingResponses.clear();
+    
+    // Notify listeners of disconnect
+    _disconnectController.add(null);
   }
 
   Future<void> disconnectDevice() async {
@@ -1291,6 +1345,9 @@ class LoRaCompanionService {
       _deviceName = null;
       _connectionStateSubscription = null;
       print('LoRa device disconnected');
+      
+      // Notify listeners of disconnect
+      _disconnectController.add(null);
     } catch (e) {
       print('Error disconnecting device: $e');
     }
@@ -1391,5 +1448,6 @@ class LoRaCompanionService {
     disconnectDevice();
     _pingResultController.close();
     _batteryController.close();
+    _disconnectController.close();
   }
 }

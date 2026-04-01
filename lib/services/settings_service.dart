@@ -353,7 +353,7 @@ class SettingsService {
   
   Future<bool> getSoundEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_soundEnabledKey) ?? false;
+    return prefs.getBool(_soundEnabledKey) ?? true;
   }
   
   Future<void> setSoundEnabled(bool value) async {
@@ -363,7 +363,7 @@ class SettingsService {
   
   Future<bool> getVibrationEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_vibrationEnabledKey) ?? false;
+    return prefs.getBool(_vibrationEnabledKey) ?? true;
   }
   
   Future<void> setVibrationEnabled(bool value) async {

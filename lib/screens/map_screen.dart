@@ -133,6 +133,10 @@ class _MapScreenState extends State<MapScreen> {
   bool _showHeatmap = false;
   final StreamController<void> _heatmapRebuildStream = StreamController.broadcast();
   
+  // Aggregation cache - skip recomputation when nothing changed
+  int _lastAggregatedSampleCount = -1;
+  int _lastAggregatedRepeaterCount = -1;
+  
   // Coverage prediction rings
   bool _showPredictionRings = false;
   
@@ -344,60 +348,66 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _loadSamples() async {
-    var samples = await _locationService.getAllSamples();
     final count = await _locationService.getSampleCount();
-    
-    // Apply session time filter if active
-    if (_activeSessionFilter != null) {
-      final start = _activeSessionFilter!.startTime;
-      final end = _activeSessionFilter!.endTime ?? DateTime.now();
-      samples = samples.where((s) =>
-          s.timestamp.isAfter(start.subtract(const Duration(seconds: 1))) &&
-          s.timestamp.isBefore(end.add(const Duration(seconds: 1)))
-      ).toList();
-    }
-    
-    // Update connection status
     final loraService = _locationService.loraCompanion;
-    
-    // Sync discovered repeaters from LoRa service
     final discoveredRepeaters = loraService.discoveredRepeaters;
-    
-    // Aggregate data with user's chosen coverage precision and repeaters
-    final result = AggregationService.buildIndexes(
-      samples, 
-      discoveredRepeaters,
-      coveragePrecision: _coveragePrecision,
-    );
-    
-    // Combine repeaters from both LoRa service (live) and aggregation result (historical)
-    // Use a map to deduplicate by ID, preferring live data when available
-    final Map<String, Repeater> repeaterMap = {};
-    
-    // First add historical repeaters from samples
-    for (final repeater in result.repeaters) {
-      repeaterMap[repeater.id] = repeater;
-    }
-    
-    // Then overlay with live discovered repeaters (these have fresher data)
-    for (final repeater in discoveredRepeaters) {
-      repeaterMap[repeater.id] = repeater;
-    }
-    
-    final combinedRepeaters = repeaterMap.values.toList();
-    
     final isConnected = loraService.isDeviceConnected;
     final connType = loraService.connectionType;
     
-    setState(() {
-      _samples = samples;
-      _sampleCount = count;
-      _aggregationResult = result;
-      _loraConnected = isConnected;
-      _connectionType = connType;
-      _autoPingEnabled = _locationService.isAutoPingEnabled;
-      _repeaters = combinedRepeaters;
-    });
+    // Skip expensive aggregation if sample count and repeater count haven't changed
+    final needsReaggregation = count != _lastAggregatedSampleCount ||
+        discoveredRepeaters.length != _lastAggregatedRepeaterCount;
+    
+    if (needsReaggregation) {
+      var samples = await _locationService.getAllSamples();
+      
+      // Apply session time filter if active
+      if (_activeSessionFilter != null) {
+        final start = _activeSessionFilter!.startTime;
+        final end = _activeSessionFilter!.endTime ?? DateTime.now();
+        samples = samples.where((s) =>
+            s.timestamp.isAfter(start.subtract(const Duration(seconds: 1))) &&
+            s.timestamp.isBefore(end.add(const Duration(seconds: 1)))
+        ).toList();
+      }
+      
+      // Aggregate data with user's chosen coverage precision and repeaters
+      final result = AggregationService.buildIndexes(
+        samples, 
+        discoveredRepeaters,
+        coveragePrecision: _coveragePrecision,
+      );
+      
+      // Combine repeaters from both LoRa service (live) and aggregation result (historical)
+      final Map<String, Repeater> repeaterMap = {};
+      for (final repeater in result.repeaters) {
+        repeaterMap[repeater.id] = repeater;
+      }
+      for (final repeater in discoveredRepeaters) {
+        repeaterMap[repeater.id] = repeater;
+      }
+      
+      _lastAggregatedSampleCount = count;
+      _lastAggregatedRepeaterCount = discoveredRepeaters.length;
+      
+      setState(() {
+        _samples = samples;
+        _sampleCount = count;
+        _aggregationResult = result;
+        _loraConnected = isConnected;
+        _connectionType = connType;
+        _autoPingEnabled = _locationService.isAutoPingEnabled;
+        _repeaters = repeaterMap.values.toList();
+      });
+    } else {
+      // Just update connection status and auto-ping state (cheap)
+      setState(() {
+        _sampleCount = count;
+        _loraConnected = isConnected;
+        _connectionType = connType;
+        _autoPingEnabled = _locationService.isAutoPingEnabled;
+      });
+    }
     
     // Update ducting badge if enabled
     if (_showDucting) {
@@ -411,7 +421,7 @@ class _MapScreenState extends State<MapScreen> {
     final connLabel = isConnected
         ? (connType == ConnectionType.usb ? 'USB' : 'BT')
         : '---';
-    final pingSamples = samples.where((s) => s.pingSuccess != null).toList();
+    final pingSamples = _samples.where((s) => s.pingSuccess != null).toList();
     final successCount = pingSamples.where((s) => s.pingSuccess == true).length;
     final rate = pingSamples.isNotEmpty
         ? '${(successCount / pingSamples.length * 100).toStringAsFixed(0)}%'
@@ -1651,11 +1661,20 @@ $placemarks  </Document>
     }
 
     _showSnackBar('Sending ping...');
+    SoundService().playPingSent();
 
     // Send ping via LoRa companion
     final result = await _locationService.loraCompanion.ping(
       latitude: _currentPosition!.latitude,
       longitude: _currentPosition!.longitude,
+    );
+
+    // Sound/vibration feedback based on result
+    final pingSuccess = result.status == PingStatus.success;
+    SoundService().playForPingResult(
+      success: pingSuccess,
+      snr: result.snr,
+      rssi: result.rssi,
     );
 
     // Create and save sample
@@ -1672,7 +1691,7 @@ $placemarks  </Document>
       geohash: geohash,
       rssi: result.rssi,
       snr: result.snr,
-      pingSuccess: result.status == PingStatus.success,
+      pingSuccess: pingSuccess,
     );
     
     await DatabaseService().insertSample(sample);
@@ -1681,7 +1700,7 @@ $placemarks  </Document>
     await _loadSamples();
 
     // Show result
-    if (result.status == PingStatus.success) {
+    if (pingSuccess) {
       _showSnackBar('✅ Ping heard by ${result.nodeId}');
     } else if (result.status == PingStatus.timeout) {
       _showSnackBar('❌ No response - dead zone');
@@ -3029,10 +3048,13 @@ $placemarks  </Document>
     );
     
     if (confirmed == true) {
-      // Disable auto-ping first
-      if (_autoPingEnabled) {
-        _locationService.disableAutoPing();
-      }
+      // Disable auto-ping and carpeater
+      _locationService.disableAutoPing();
+      _locationService.carpeaterService.stop();
+      setState(() {
+        _autoPingEnabled = false;
+        _carpeaterState = CarpeaterState.disabled;
+      });
       
       await _locationService.loraCompanion.disconnectDevice();
       await _loadSamples();

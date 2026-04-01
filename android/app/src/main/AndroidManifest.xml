@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
+    <!-- Vibration for ping feedback -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    
     <!-- Internet for map tiles -->
     <uses-permission android:name="android.permission.INTERNET" />
     

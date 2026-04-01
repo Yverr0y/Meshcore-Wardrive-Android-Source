@@ -28,6 +28,13 @@ class LocationService {
   
   LocationService() {
     _carpeaterService = CarpeaterService(_loraCompanion, _settings);
+    // Auto-disable auto-ping on device disconnect
+    _loraCompanion.disconnectStream.listen((_) {
+      if (_autoPingEnabled) {
+        disableAutoPing();
+        _logger.logPingEvent('Auto-ping disabled (device disconnected)');
+      }
+    });
   }
   StreamSubscription<Position>? _positionStreamSubscription;
   bool _isTracking = false;
@@ -113,6 +120,14 @@ class LocationService {
   void setCarpeaterMode(bool enabled) {
     _carpeaterModeEnabled = enabled;
     _logger.logServiceEvent('Carpeater mode ${enabled ? "enabled" : "disabled"}');
+    if (!enabled) {
+      // Stop the carpeater discovery loop
+      _carpeaterNeighboursSubscription?.cancel();
+      _carpeaterDiscoveryStartedSubscription?.cancel();
+      _carpeaterService.stop();
+      // Resume time-based auto-ping if applicable
+      _restartTimePingTimer();
+    }
   }
 
   /// Check if location permissions are granted
@@ -627,7 +642,6 @@ class LocationService {
       print('Saved ping result: ${sample.id}');
       // Notify listeners
       _sampleSavedController.add(null);
-      _pingInProgress = false;
     } catch (e) {
       await _logger.logError('Background Ping', e.toString());
       print('Error during background ping: $e');
@@ -645,6 +659,7 @@ class LocationService {
       await _dbService.insertSample(sample);
       // Notify listeners
       _sampleSavedController.add(null);
+    } finally {
       _pingInProgress = false;
     }
   }

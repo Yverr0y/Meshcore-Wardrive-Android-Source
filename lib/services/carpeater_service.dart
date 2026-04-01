@@ -150,10 +150,11 @@ class CarpeaterService {
   
   /// Stop Carpeater mode
   void stop() {
-    if (_stopSignal != null && !_stopSignal!.isCompleted) {
-      _stopSignal!.complete();
-    }
+    final signal = _stopSignal;
     _stopSignal = null;
+    if (signal != null && !signal.isCompleted) {
+      signal.complete();
+    }
     _loginCompleter?.complete(null);
     _sentCompleter?.complete(false);
     _neighboursCompleter?.complete(null);
@@ -255,11 +256,12 @@ class CarpeaterService {
     _runDiscoveryLoop();
   }
 
+  bool get _isStopped => _stopSignal == null || _stopSignal!.isCompleted;
+  
   Future<void> _runDiscoveryLoop() async {
-    while (_stopSignal != null && !_stopSignal!.isCompleted) {
+    while (!_isStopped) {
       await _runDiscoveryCycle();
-      if (_stopSignal == null || _stopSignal!.isCompleted) break;
-      if (_state == CarpeaterState.disabled) break;
+      if (_isStopped || _state == CarpeaterState.disabled) break;
       
       // Auto-reconnect after consecutive failures
       if (_state == CarpeaterState.error) {
@@ -274,31 +276,33 @@ class CarpeaterService {
         }
       }
       
+      if (_isStopped) break;
       _debugLog.logInfo(
         'Carpeater: Cycle $cyclesCompleted complete — waiting ${_discoveryIntervalSeconds}s...',
       );
+      final signal = _stopSignal;
+      if (signal == null) break;
       await Future.any([
         Future.delayed(Duration(seconds: _discoveryIntervalSeconds)),
-        _stopSignal!.future,
+        signal.future,
       ]);
     }
     _debugLog.logInfo('Carpeater: Discovery loop exited');
   }
   
   /// Run a single discovery cycle
+  /// 
+  /// Optimized for speed: skips clearing neighbours (just overwrites),
+  /// uses short 3s discovery wait (v1.14+ zero-hop adverts are fast),
+  /// and reduced timeouts on first attempts.
   Future<void> _runDiscoveryCycle() async {
     if (_state == CarpeaterState.disabled) return;
     
     try {
       _setState(CarpeaterState.discovering);
-      
-      // Step 1: Clear neighbour table
-      final clearOk = await _clearPreviousNeighbours();
-      if (!clearOk) {
-        _debugLog.logError('Carpeater: Could not clear neighbours — continuing anyway');
-      }
 
-      // Step 2: Trigger discovery
+      // Step 1: Trigger discovery (skip clearing — neighbours accumulate but
+      // we fetch a fresh snapshot each cycle anyway)
       final advertOk = await _triggerRepeaterAdvert();
       if (!advertOk) {
         _debugLog.logError('Carpeater: Could not trigger advert — skipping cycle');
@@ -310,10 +314,9 @@ class CarpeaterService {
       // Notify listeners to snapshot GPS position
       _discoveryStartedController.add(null);
       
-      // Step 3: Wait for responses (respects stop signal)
-      // v1.14+ repeaters handle discover.neighbors natively via zero-hop adverts,
-      // so responses arrive within a few seconds of LoRa airtime.
-      const discoveryWaitSeconds = 8;
+      // Step 2: Wait for responses — v1.14+ repeaters respond via zero-hop
+      // adverts within 1-2s of LoRa airtime. 3s is plenty.
+      const discoveryWaitSeconds = 3;
       _debugLog.logInfo('Carpeater: Waiting ${discoveryWaitSeconds}s for responses...');
       await Future.any([
         Future.delayed(const Duration(seconds: discoveryWaitSeconds)),
@@ -321,7 +324,7 @@ class CarpeaterService {
       ]);
       if (_stopSignal == null || _stopSignal!.isCompleted) return;
       
-      // Step 4: Fetch neighbours
+      // Step 3: Fetch neighbours
       _setState(CarpeaterState.fetchingNeighbours);
       final neighbours = await _fetchNeighbours();
       
@@ -350,9 +353,9 @@ class CarpeaterService {
   Future<bool> _triggerRepeaterAdvert() async {
     if (_targetRepeaterPubKeyBytes == null) return false;
 
-    const maxAttempts = 3;
+    const maxAttempts = 2;
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (attempt > 1) await Future.delayed(const Duration(seconds: 3));
+      if (attempt > 1) await Future.delayed(const Duration(seconds: 2));
       try {
         _sentCompleter = Completer<bool>();
         final enqueued = await _loraService.sendRepeaterCliCommand(
@@ -361,7 +364,7 @@ class CarpeaterService {
         );
         if (!enqueued) { _sentCompleter = null; continue; }
         final acked = await _sentCompleter!.future
-            .timeout(const Duration(seconds: 10), onTimeout: () => false);
+            .timeout(const Duration(seconds: 5), onTimeout: () => false);
         _sentCompleter = null;
         if (acked) return true;
       } catch (e) {
@@ -374,9 +377,9 @@ class CarpeaterService {
   Future<List<Map<String, dynamic>>?> _fetchNeighbours() async {
     if (_targetRepeaterPubKeyBytes == null) return null;
 
-    const maxAttempts = 3;
+    const maxAttempts = 2;
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (attempt > 1) await Future.delayed(const Duration(seconds: 5));
+      if (attempt > 1) await Future.delayed(const Duration(seconds: 2));
       try {
         _neighboursCompleter = Completer<Map<String, dynamic>?>();
         final sent = await _loraService.sendRepeaterGetNeighbours(
@@ -384,7 +387,7 @@ class CarpeaterService {
         );
         if (!sent) { _neighboursCompleter = null; continue; }
         final response = await _neighboursCompleter!.future
-            .timeout(const Duration(seconds: 15), onTimeout: () => null);
+            .timeout(const Duration(seconds: 8), onTimeout: () => null);
         _neighboursCompleter = null;
         if (response == null) continue;
         return (response['neighbours'] as List?)?.cast<Map<String, dynamic>>() ?? [];

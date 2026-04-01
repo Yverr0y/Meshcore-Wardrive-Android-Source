@@ -25,6 +25,35 @@ class UploadService {
   
   final DatabaseService _db = DatabaseService();
   
+  /// Convert a list of samples to the JSON format expected by upload endpoints
+  static List<Map<String, dynamic>> _samplesToJson(
+    List<Sample> samples, {
+    Map<String, String>? repeaterNames,
+  }) {
+    return samples.map((sample) => {
+      'id': sample.id,
+      'nodeId': (sample.path == null || sample.path!.isEmpty)
+          ? 'Unknown'
+          : (sample.path!.length > 8 ? sample.path!.substring(0, 8).toUpperCase() : sample.path!.toUpperCase()),
+      'repeaterName': (() {
+        final name = (sample.path != null && repeaterNames != null)
+            ? repeaterNames![sample.path]
+            : null;
+        if (name != null && name.isNotEmpty) return name;
+        if (sample.path == null || sample.path!.isEmpty) return 'Unknown';
+        final short = sample.path!.length > 8 ? sample.path!.substring(0,8).toUpperCase() : sample.path!.toUpperCase();
+        return short;
+      })(),
+      'latitude': sample.position.latitude,
+      'longitude': sample.position.longitude,
+      'rssi': sample.rssi,
+      'snr': sample.snr,
+      'pingSuccess': sample.pingSuccess,
+      'timestamp': sample.timestamp.toIso8601String(),
+      'appVersion': appVersion,
+    }).toList();
+  }
+  
   Future<String> getApiUrl() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_apiUrlKey) ?? defaultApiUrl;
@@ -73,29 +102,7 @@ class UploadService {
         return UploadResult(success: true, message: 'No new samples to upload');
       }
       
-      // Convert samples to JSON (include stable id for server-side dedupe)
-      final samplesJson = samples.map((sample) => {
-        'id': sample.id,
-        'nodeId': (sample.path == null || sample.path!.isEmpty)
-            ? 'Unknown'
-            : (sample.path!.length > 8 ? sample.path!.substring(0, 8).toUpperCase() : sample.path!.toUpperCase()),
-        'repeaterName': (() {
-          final name = (sample.path != null && repeaterNames != null)
-              ? repeaterNames![sample.path]
-              : null;
-          if (name != null && name.isNotEmpty) return name;
-          if (sample.path == null || sample.path!.isEmpty) return 'Unknown';
-          final short = sample.path!.length > 8 ? sample.path!.substring(0,8).toUpperCase() : sample.path!.toUpperCase();
-          return short;
-        })(),
-        'latitude': sample.position.latitude,
-        'longitude': sample.position.longitude,
-        'rssi': sample.rssi,
-        'snr': sample.snr,
-        'pingSuccess': sample.pingSuccess,
-        'timestamp': sample.timestamp.toIso8601String(),
-        'appVersion': appVersion, // App version from constants
-      }).toList();
+      final samplesJson = _samplesToJson(samples, repeaterNames: repeaterNames);
       
       print('Uploading ${samplesJson.length} samples in batches...');
       
@@ -312,29 +319,7 @@ class UploadService {
     {Map<String, String>? repeaterNames,
     Function(int current, int total)? onProgress,
   }) async {
-    // Convert samples to JSON
-    final samplesJson = samples.map((sample) => {
-      'id': sample.id,
-      'nodeId': (sample.path == null || sample.path!.isEmpty)
-          ? 'Unknown'
-          : (sample.path!.length > 8 ? sample.path!.substring(0, 8).toUpperCase() : sample.path!.toUpperCase()),
-      'repeaterName': (() {
-        final name = (sample.path != null && repeaterNames != null)
-            ? repeaterNames![sample.path]
-            : null;
-        if (name != null && name.isNotEmpty) return name;
-        if (sample.path == null || sample.path!.isEmpty) return 'Unknown';
-        final short = sample.path!.length > 8 ? sample.path!.substring(0,8).toUpperCase() : sample.path!.toUpperCase();
-        return short;
-      })(),
-      'latitude': sample.position.latitude,
-      'longitude': sample.position.longitude,
-      'rssi': sample.rssi,
-      'snr': sample.snr,
-      'pingSuccess': sample.pingSuccess,
-      'timestamp': sample.timestamp.toIso8601String(),
-      'appVersion': appVersion,
-    }).toList();
+    final samplesJson = _samplesToJson(samples, repeaterNames: repeaterNames);
     
     print('Uploading ${samplesJson.length} samples to $apiUrl in batches...');
     
