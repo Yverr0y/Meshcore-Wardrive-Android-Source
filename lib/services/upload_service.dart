@@ -51,6 +51,7 @@ class UploadService {
       'pingSuccess': sample.pingSuccess,
       'timestamp': sample.timestamp.toIso8601String(),
       'appVersion': appVersion,
+      if (sample.source != null) 'source': sample.source,
     }).toList();
   }
   

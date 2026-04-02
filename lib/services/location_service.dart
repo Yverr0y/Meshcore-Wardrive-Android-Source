@@ -47,6 +47,7 @@ class LocationService {
   int _pingTimeIntervalSeconds = 60;
   Timer? _timePingTimer;
   bool _pingInProgress = false; // Guard against overlapping pings
+  DateTime? _lastPingTimestamp; // When the last ping was triggered (any source)
   
   // Distance tracking
   double _totalDistanceMeters = 0.0;
@@ -118,15 +119,22 @@ class LocationService {
   
   /// Enable or disable Carpeater mode at runtime
   void setCarpeaterMode(bool enabled) {
+    final wasEnabled = _carpeaterModeEnabled;
     _carpeaterModeEnabled = enabled;
     _logger.logServiceEvent('Carpeater mode ${enabled ? "enabled" : "disabled"}');
-    if (!enabled) {
-      // Stop the carpeater discovery loop
+    
+    if (enabled && !wasEnabled && _isTracking && _loraCompanion.isDeviceConnected) {
+      // Switching to carpeater mid-tracking: disable auto-ping and start carpeater
+      disableAutoPing();
+      startCarpeater();
+    } else if (!enabled && wasEnabled) {
+      // Switching off carpeater: stop it and resume auto-ping if tracking
       _carpeaterNeighboursSubscription?.cancel();
       _carpeaterDiscoveryStartedSubscription?.cancel();
       _carpeaterService.stop();
-      // Resume time-based auto-ping if applicable
-      _restartTimePingTimer();
+      if (_isTracking && _loraCompanion.isDeviceConnected) {
+        enableAutoPing();
+      }
     }
   }
 
@@ -419,12 +427,19 @@ class LocationService {
     final position = _lastPosition;
     if (position == null) return;
     
-    // For 'both' mode, skip if distance threshold was recently met
-    // (the distance ping already covered this location)
-    // We always ping on time to handle stationary scenarios
+    // In 'both' mode, skip if a distance ping fired recently
+    // (no point pinging the same spot twice)
+    if (_pingMode == 'both' && _lastPingTimestamp != null) {
+      final elapsed = DateTime.now().difference(_lastPingTimestamp!);
+      if (elapsed.inSeconds < _pingTimeIntervalSeconds ~/ 2) {
+        _logger.logPingEvent('Time ping skipped — distance ping fired ${elapsed.inSeconds}s ago');
+        return;
+      }
+    }
     
     _pingInProgress = true;
     _lastPingPosition = position;
+    _lastPingTimestamp = DateTime.now();
     
     final geohash = GeohashUtils.sampleKey(position.latitude, position.longitude);
     await _logger.logPingEvent('Time-based ping triggered at ${position.latitude}, ${position.longitude}');
@@ -520,6 +535,7 @@ class LocationService {
         // Update last ping position immediately to prevent multiple pings
         _pingInProgress = true;
         _lastPingPosition = latLng;
+        _lastPingTimestamp = DateTime.now();
         await _logger.logPingEvent('Distance-based ping triggered at ${latLng.latitude}, ${latLng.longitude}');
         
         // Notify UI that ping is starting
@@ -786,6 +802,26 @@ class LocationService {
     
     final geohash = GeohashUtils.sampleKey(position.latitude, position.longitude);
     
+    // Filter out the target repeater itself — it always shows up as its own neighbour
+    final targetId = _carpeaterService.targetRepeaterId?.toUpperCase();
+    final filtered = neighbours.where((n) {
+      final pubkey = n['pubkey'] as String?;
+      if (pubkey == null || targetId == null) return true;
+      final nId = pubkey.length >= 8 ? pubkey.substring(0, 8).toUpperCase() : pubkey.toUpperCase();
+      return !nId.startsWith(targetId);
+    }).toList();
+    
+    // Also filter ignored repeater prefix if set
+    final ignoredPrefix = _loraCompanion.ignoredRepeaterPrefix;
+    final results = ignoredPrefix != null && ignoredPrefix.isNotEmpty
+        ? filtered.where((n) {
+            final pubkey = n['pubkey'] as String?;
+            if (pubkey == null) return true;
+            final nId = pubkey.length >= 8 ? pubkey.substring(0, 8).toUpperCase() : pubkey.toUpperCase();
+            return !nId.startsWith(ignoredPrefix.toUpperCase());
+          }).toList()
+        : filtered;
+    
     // Get ducting risk if enabled
     String? ductingRisk;
     if (_ductingEnabled) {
@@ -793,7 +829,7 @@ class LocationService {
       if (ductingRisk == DuctingRisk.unknown) ductingRisk = null;
     }
     
-    if (neighbours.isEmpty) {
+    if (results.isEmpty) {
       // Dead zone — repeater heard nobody
       final sample = Sample(
         id: _generateUniqueId(),
@@ -809,7 +845,7 @@ class LocationService {
       _soundService.playPingFailed();
     } else {
       // Save one sample per neighbour
-      for (final n in neighbours) {
+      for (final n in results) {
         final pubkey = n['pubkey'] as String?;
         final snr = (n['snr'] as num?)?.toInt();
         final repeaterId = pubkey != null && pubkey.length >= 8
@@ -829,8 +865,8 @@ class LocationService {
         await _dbService.insertSample(sample);
       }
       _pingEventController.add('success');
-      // Use best SNR from neighbours for sound quality
-      final bestSnr = neighbours
+      // Use best SNR from filtered results for sound quality
+      final bestSnr = results
           .map((n) => (n['snr'] as num?)?.toInt())
           .where((s) => s != null)
           .fold<int?>(null, (best, s) => best == null || s! > best ? s : best);
@@ -841,9 +877,9 @@ class LocationService {
     
     FlutterForegroundTask.updateService(
       notificationTitle: 'MeshCore Wardrive',
-      notificationText: neighbours.isEmpty
+      notificationText: results.isEmpty
           ? 'Carpeater: No neighbours'
-          : 'Carpeater: ${neighbours.length} neighbours found',
+          : 'Carpeater: ${results.length} neighbours found',
     );
     Future.delayed(const Duration(seconds: 3), () {
       FlutterForegroundTask.updateService(

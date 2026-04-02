@@ -1,5 +1,59 @@
 # Changelog
 
+## v1.0.35 - 2026-04-02
+
+### Added
+- **Multi-Device Wardrive**: Merge coverage data from multiple users into one map
+  - `source` field on samples identifies which device/operator collected the data
+  - Device Name setting in Settings for tagging your exports
+  - Multi-file import with merge summary dialog (shows source, count, overlap)
+  - Filter by Source in Data Management to view data from a specific contributor
+- **Repeater Health Dashboard**: Dedicated per-repeater analysis screen
+  - List view with sortable repeater cards (reliability, response time, ping count, alerts first)
+  - Degradation alerts: warning icon when 7-day success rate drops >15% vs 30-day average
+  - Tap-to-drill-down detail page per repeater:
+    - SNR over time line chart
+    - Weekly success rate bar chart
+    - Best/worst time of day breakdown
+    - Last 20 ping results history
+  - Alert count chip in app bar
+- **Settings Export/Import**: Backup and restore all app preferences as JSON
+  - Export via share sheet (includes upload endpoints, carpeater config, display settings)
+  - Import with confirmation dialog — wardrive data is not affected
+  - Useful for reinstalls and sharing configs with MeshCore communities
+- **Carpeater Mode (Beta)** label with v1.14+ firmware requirement hint
+- **Manual ping sound/vibration feedback** — matches auto-ping behavior
+
+### Fixed
+- **Device position command**: `CMD_SET_POSITION` was using code 20 (battery request) instead of 14 (lat/lon) — pings now route correctly through the mesh
+- **Auto-ping lock**: `_pingInProgress` flag could get stuck permanently, blocking all future auto-pings (now uses `finally` block)
+- **Carpeater toggle mid-tracking**: Enabling/disabling carpeater in settings now properly starts/stops the service and resumes auto-ping
+- **Session history filter**: Selecting a session no longer fails to update the map (aggregation cache bypass)
+- **Carpeater self-filtering**: Target repeater automatically excluded from neighbour results (no need to add to ignore list)
+- **USB disconnect detection**: Pulling USB cable now properly disconnects and disables auto-ping (mirrors Bluetooth handler)
+- **Stream controller leak**: `_disconnectController` now closed in `dispose()`
+- **SQLite WAL pragma**: Fixed `execute` → `rawQuery` for Android compatibility
+
+### Improved
+- **Sound**: Switched from `STREAM_NOTIFICATION` to `STREAM_MUSIC` for reliable audio playback
+- **Vibration**: Uses `USAGE_ALARM` VibrationAttributes to bypass Samsung touch vibration setting
+- Sound and vibration enabled by default for new installs
+- **Ping timing**: Rate limit reduced from 30s to 5s, default discovery timeout from 20s to 8s
+- **Both mode dedup**: Time-based pings skip if a distance ping fired recently
+- **Aggregation caching**: Skips full recomputation when sample/repeater count unchanged
+- **SQLite WAL mode** for better concurrent read/write during wardriving
+- **Ping rate limit enforced**: Actually waits cooldown instead of just logging
+- **Advertisement map cleanup**: Stale entries pruned every 5 minutes
+- **Upload JSON deduplicated**: Extracted shared `_samplesToJson()` method
+
+### Technical
+- Database version 8 → 9: new `source` column on samples with index
+- New `repeater_health_screen.dart` (~670 lines)
+- `SettingsService` extended with `exportSettings()`/`importSettings()` and `device_name`
+- `LoRaCompanionService`: added `_handleUsbDisconnection()`, `ignoredRepeaterPrefix` getter, advert cleanup
+- `MeshCoreProtocol`: `CMD_SET_ADVERT_LATLON = 14` (was incorrectly `CMD_SET_POSITION = 20`)
+- Native `MainActivity.kt`: `STREAM_MUSIC` audio, `USAGE_ALARM` vibration attributes, debug logging
+
 ## v1.0.34 - 2026-04-01
 
 ### Added

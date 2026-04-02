@@ -41,6 +41,7 @@ import '../services/carpeater_service.dart';
 import '../services/sound_service.dart';
 import '../services/tile_download_service.dart';
 import 'analytics_screen.dart';
+import 'repeater_health_screen.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -136,6 +137,9 @@ class _MapScreenState extends State<MapScreen> {
   // Aggregation cache - skip recomputation when nothing changed
   int _lastAggregatedSampleCount = -1;
   int _lastAggregatedRepeaterCount = -1;
+  
+  // Source filter for multi-device wardrive
+  String? _activeSourceFilter;
   
   // Coverage prediction rings
   bool _showPredictionRings = false;
@@ -369,6 +373,11 @@ class _MapScreenState extends State<MapScreen> {
             s.timestamp.isAfter(start.subtract(const Duration(seconds: 1))) &&
             s.timestamp.isBefore(end.add(const Duration(seconds: 1)))
         ).toList();
+      }
+      
+      // Apply source filter if active
+      if (_activeSourceFilter != null) {
+        samples = samples.where((s) => s.source == _activeSourceFilter).toList();
       }
       
       // Aggregate data with user's chosen coverage precision and repeaters
@@ -712,29 +721,147 @@ $placemarks  </Document>
 
   Future<void> _importData() async {
     try {
-      // Pick a JSON file
+      // Pick JSON file(s) — allow multiple for community merge
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        allowMultiple: true,
+      );
+      
+      if (result == null || result.files.isEmpty) return;
+      
+      // Collect all samples from all files
+      final List<Map<String, dynamic>> allJsonData = [];
+      final Set<String> sources = {};
+      
+      for (final pickedFile in result.files) {
+        if (pickedFile.path == null) continue;
+        final file = File(pickedFile.path!);
+        final jsonString = await file.readAsString();
+        final List<dynamic> jsonData = jsonDecode(jsonString);
+        for (final item in jsonData) {
+          final map = item as Map<String, dynamic>;
+          allJsonData.add(map);
+          if (map['source'] != null) sources.add(map['source'] as String);
+        }
+      }
+      
+      if (allJsonData.isEmpty) {
+        _showSnackBar('No samples found in file(s)');
+        return;
+      }
+      
+      // Show merge summary before importing
+      if (!mounted) return;
+      final sourceLabel = sources.isNotEmpty
+          ? sources.join(', ')
+          : 'Unknown source';
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Import Wardrive Data'),
+          content: Text(
+            '${allJsonData.length} samples from ${result.files.length} file(s)\n'
+            'Source: $sourceLabel\n\n'
+            'Duplicate samples will be skipped automatically.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Import'),
+            ),
+          ],
+        ),
+      );
+      
+      if (confirmed != true) return;
+      
+      // Import samples
+      final importedCount = await _locationService.importSamples(allJsonData);
+      
+      // Reload map
+      _lastAggregatedSampleCount = -1;
+      await _loadSamples();
+      
+      _showSnackBar('Imported $importedCount new samples from $sourceLabel');
+    } catch (e) {
+      _showSnackBar('Import failed: $e');
+    }
+  }
+
+  Future<void> _exportSettings() async {
+    try {
+      final jsonString = await _settingsService.exportSettingsJson();
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final fileName = 'meshcore_settings_$timestamp.json';
+      
+      // Save to a temp file and share
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsString(jsonString);
+      
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'MeshCore Wardrive Settings',
+      );
+    } catch (e) {
+      _showSnackBar('Export failed: $e');
+    }
+  }
+  
+  Future<void> _importSettings() async {
+    try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['json'],
       );
       
-      if (result == null || result.files.single.path == null) {
-        return; // User cancelled
-      }
+      if (result == null || result.files.single.path == null) return;
       
       final file = File(result.files.single.path!);
       final jsonString = await file.readAsString();
-      final List<dynamic> jsonData = jsonDecode(jsonString);
       
-      // Import samples
-      final importedCount = await _locationService.importSamples(
-        jsonData.cast<Map<String, dynamic>>(),
+      // Show confirmation dialog
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Import Settings'),
+          content: const Text(
+            'This will overwrite your current app settings '
+            '(display options, ping settings, upload servers, carpeater config, etc).\n\n'
+            'Your wardrive data will NOT be affected.\n\n'
+            'Continue?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Import'),
+            ),
+          ],
+        ),
       );
       
-      // Reload map
+      if (confirmed != true) return;
+      
+      final applied = await _settingsService.importSettingsJson(jsonString);
+      
+      // Reload settings to apply changes
+      await _loadSettings();
+      _lastAggregatedSampleCount = -1; // Force reaggregation
       await _loadSamples();
       
-      _showSnackBar('Imported $importedCount new samples');
+      _showSnackBar('Imported $applied settings');
+    } on FormatException catch (e) {
+      _showSnackBar('Invalid settings file: ${e.message}');
     } catch (e) {
       _showSnackBar('Import failed: $e');
     }
@@ -2260,7 +2387,7 @@ $placemarks  </Document>
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(
-                'Carpeater Mode',
+                'Carpeater Mode (Beta)',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               ),
             ),
@@ -2268,13 +2395,17 @@ $placemarks  </Document>
               title: const Text('Enable Carpeater Mode'),
               subtitle: Text(_carpeaterEnabled
                   ? 'Using repeater for discovery'
-                  : 'Use a repeater to discover neighbors'),
+                  : 'Use a repeater to discover neighbors\nRequires v1.14+ firmware on all repeaters'),
               value: _carpeaterEnabled,
               onChanged: (value) async {
                 setState(() { _carpeaterEnabled = value; });
                 setModalState(() {});
                 await _settingsService.setCarpeaterEnabled(value);
                 _locationService.setCarpeaterMode(value);
+                // Sync auto-ping UI state after mode switch
+                setState(() {
+                  _autoPingEnabled = _locationService.isAutoPingEnabled;
+                });
               },
             ),
             if (_carpeaterEnabled) ...[
@@ -2362,6 +2493,41 @@ $placemarks  </Document>
                 ),
               ),
             ],
+            const Divider(),
+            ListTile(
+              title: const Text('Device Name'),
+              subtitle: FutureBuilder<String?>(
+                future: _settingsService.getDeviceName(),
+                builder: (context, snap) => Text(snap.data ?? 'Not set — used for multi-device wardrive'),
+              ),
+              leading: const Icon(Icons.badge),
+              trailing: const Icon(Icons.edit, size: 20),
+              onTap: () async {
+                final current = await _settingsService.getDeviceName();
+                final controller = TextEditingController(text: current ?? '');
+                final result = await showDialog<String>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Device Name'),
+                    content: TextField(
+                      controller: controller,
+                      decoration: const InputDecoration(
+                        labelText: 'Name',
+                        hintText: 'e.g., Chuck-Pixel',
+                      ),
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                      TextButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Save')),
+                    ],
+                  ),
+                );
+                if (result != null) {
+                  await _settingsService.setDeviceName(result.isEmpty ? null : result);
+                  setModalState(() {});
+                }
+              },
+            ),
             const Divider(),
             SwitchListTile(
               title: const Text('Lock Map Rotation'),
@@ -2827,6 +2993,7 @@ $placemarks  </Document>
                           _activeSessionFilter = null;
                         });
                         setModalState(() {});
+                        _lastAggregatedSampleCount = -1; // Force reaggregation
                         _loadSamples();
                         _showSnackBar('Session filter cleared');
                       },
@@ -2891,6 +3058,60 @@ $placemarks  </Document>
               },
             ),
             ListTile(
+              title: const Text('Filter by Source'),
+              subtitle: Text(_activeSourceFilter != null
+                  ? 'Showing: $_activeSourceFilter'
+                  : 'Filter by device/operator'),
+              leading: const Icon(Icons.people),
+              trailing: _activeSourceFilter != null
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, color: Colors.red),
+                      onPressed: () async {
+                        setState(() { _activeSourceFilter = null; });
+                        setModalState(() {});
+                        _lastAggregatedSampleCount = -1;
+                        _loadSamples();
+                        _showSnackBar('Source filter cleared');
+                      },
+                    )
+                  : const Icon(Icons.arrow_forward),
+              onTap: () async {
+                final sources = await DatabaseService().getDistinctSources();
+                if (sources.isEmpty) {
+                  _showSnackBar('No source-tagged data yet');
+                  return;
+                }
+                if (!context.mounted) return;
+                final picked = await showDialog<String>(
+                  context: context,
+                  builder: (context) => SimpleDialog(
+                    title: const Text('Filter by Source'),
+                    children: [
+                      SimpleDialogOption(
+                        onPressed: () => Navigator.pop(context, null),
+                        child: const Text('Show All', style: TextStyle(fontStyle: FontStyle.italic)),
+                      ),
+                      ...sources.map((s) => SimpleDialogOption(
+                        onPressed: () => Navigator.pop(context, s),
+                        child: Text(s),
+                      )),
+                    ],
+                  ),
+                );
+                if (picked != null || _activeSourceFilter != null) {
+                  setState(() { _activeSourceFilter = picked; });
+                  setModalState(() {});
+                  _lastAggregatedSampleCount = -1;
+                  _loadSamples();
+                  if (picked != null) {
+                    _showSnackBar('Showing data from: $picked');
+                  } else {
+                    _showSnackBar('Source filter cleared');
+                  }
+                }
+              },
+            ),
+            ListTile(
               title: const Text('Find Coverage Gaps'),
               subtitle: const Text('Locate areas with poor signal'),
               leading: const Icon(Icons.location_searching),
@@ -2933,9 +3154,50 @@ $placemarks  </Document>
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(
+                'Settings Backup',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+            ),
+            ListTile(
+              title: const Text('Export Settings'),
+              subtitle: const Text('Save all app settings to file'),
+              leading: const Icon(Icons.upload_file),
+              onTap: () {
+                Navigator.pop(context);
+                _exportSettings();
+              },
+            ),
+            ListTile(
+              title: const Text('Import Settings'),
+              subtitle: const Text('Load settings from file'),
+              leading: const Icon(Icons.download),
+              onTap: () {
+                Navigator.pop(context);
+                _importSettings();
+              },
+            ),
+            const Divider(),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
                 'Debug',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               ),
+            ),
+            ListTile(
+              title: const Text('Repeater Health'),
+              subtitle: const Text('Per-repeater stats, trends & alerts'),
+              leading: const Icon(Icons.health_and_safety),
+              trailing: const Icon(Icons.arrow_forward),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => RepeaterHealthScreen(samples: _samples),
+                  ),
+                );
+              },
             ),
             ListTile(
               title: const Text('Signal Trends'),
@@ -3151,6 +3413,7 @@ $placemarks  </Document>
             setState(() {
               _activeSessionFilter = session;
             });
+            _lastAggregatedSampleCount = -1; // Force reaggregation with filter
             _loadSamples();
             _showSnackBar('Showing session from ${DateFormat('MMM d, h:mm a').format(session.startTime)}');
           },

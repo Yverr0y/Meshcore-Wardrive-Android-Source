@@ -11,6 +11,7 @@ class Sample {
   final bool? pingSuccess;
   final int? responseTimeMs;
   final String? ductingRisk;
+  final String? source; // Device/operator name for multi-device wardrive
 
   Sample({
     required this.id,
@@ -23,6 +24,7 @@ class Sample {
     this.pingSuccess,
     this.responseTimeMs,
     this.ductingRisk,
+    this.source,
   });
 
   Map<String, dynamic> toJson() => {
@@ -37,6 +39,7 @@ class Sample {
         'pingSuccess': pingSuccess,
         'responseTimeMs': responseTimeMs,
         'ductingRisk': ductingRisk,
+        'source': source,
       };
 
   factory Sample.fromJson(Map<String, dynamic> json) {
@@ -54,6 +57,7 @@ class Sample {
       pingSuccess: json['pingSuccess'] as bool?,
       responseTimeMs: (json['responseTimeMs'] as num?)?.toInt(),
       ductingRisk: json['ductingRisk'] as String?,
+      source: json['source'] as String?,
     );
   }
 
@@ -69,6 +73,7 @@ class Sample {
         'pingSuccess': pingSuccess == true ? 1 : (pingSuccess == false ? 0 : null),
         'response_time_ms': responseTimeMs,
         'ducting_risk': ductingRisk,
+        'source': source,
       };
 
   factory Sample.fromMap(Map<String, dynamic> map) {
@@ -84,6 +89,7 @@ class Sample {
       pingSuccess: pingSuccessInt == null ? null : pingSuccessInt == 1,
       responseTimeMs: map['response_time_ms'] as int?,
       ductingRisk: map['ducting_risk'] as String?,
+      source: map['source'] as String?,
     );
   }
 }

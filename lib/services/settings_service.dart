@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsService {
@@ -34,6 +35,7 @@ class SettingsService {
   static const String _carpeaterRepeaterIdKey = 'carpeater_repeater_id';
   static const String _carpeaterPasswordKey = 'carpeater_password';
   static const String _carpeaterIntervalKey = 'carpeater_interval_seconds';
+  static const String _deviceNameKey = 'device_name';
   
   Future<bool> getShowSamples() async {
     final prefs = await SharedPreferences.getInstance();
@@ -181,7 +183,7 @@ class SettingsService {
   /// Get discovery timeout in seconds (10-30 seconds, default 20)
   Future<int> getDiscoveryTimeout() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_discoveryTimeoutKey) ?? 20;
+    return prefs.getInt(_discoveryTimeoutKey) ?? 8;
   }
   
   Future<void> setDiscoveryTimeout(int value) async {
@@ -419,5 +421,133 @@ class SettingsService {
   Future<void> setCarpeaterInterval(int value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_carpeaterIntervalKey, value);
+  }
+  
+  /// Get device/operator name for multi-device wardrive
+  Future<String?> getDeviceName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_deviceNameKey);
+  }
+  
+  /// Set device/operator name
+  Future<void> setDeviceName(String? value) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (value == null || value.isEmpty) {
+      await prefs.remove(_deviceNameKey);
+    } else {
+      await prefs.setString(_deviceNameKey, value);
+    }
+  }
+  
+  /// All preference keys that should be exported/imported
+  static const List<String> _exportKeys = [
+    _showSamplesKey,
+    _showGpsSamplesKey,
+    _showCoverageKey,
+    _showEdgesKey,
+    _showRepeatersKey,
+    _colorModeKey,
+    _pingIntervalKey,
+    _coveragePrecisionKey,
+    _ignoredRepeaterPrefixKey,
+    _includeOnlyRepeatersKey,
+    _filterEdgesByWhitelistKey,
+    _distanceUnitKey,
+    _colorBlindModeKey,
+    _discoveryTimeoutKey,
+    _totalDistanceDrivenKey,
+    _vehicleMpgKey,
+    _gasPriceKey,
+    _fuelUnitKey,
+    _showRouteTrailKey,
+    _showHeatmapKey,
+    _showPredictionRingsKey,
+    _showDuctingKey,
+    _goalCenterLatKey,
+    _goalCenterLonKey,
+    _goalRadiusMetersKey,
+    _soundEnabledKey,
+    _vibrationEnabledKey,
+    _pingModeKey,
+    _pingTimeIntervalKey,
+    _carpeaterEnabledKey,
+    _carpeaterRepeaterIdKey,
+    _carpeaterPasswordKey,
+    _carpeaterIntervalKey,
+    _deviceNameKey,
+    // Upload service keys
+    'upload_api_url',
+    'auto_upload_enabled',
+    'upload_endpoints',
+    'selected_endpoints',
+    // Theme
+    'theme_mode',
+  ];
+  
+  /// Export all settings to a JSON-encodable map
+  Future<Map<String, dynamic>> exportSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final Map<String, dynamic> data = {
+      '_format': 'meshcore_wardrive_settings',
+      '_version': 1,
+      '_exportedAt': DateTime.now().toIso8601String(),
+    };
+    
+    for (final key in _exportKeys) {
+      final value = prefs.get(key);
+      if (value != null) {
+        data[key] = value;
+      }
+    }
+    
+    return data;
+  }
+  
+  /// Import settings from a JSON map. Returns the number of settings applied.
+  Future<int> importSettings(Map<String, dynamic> data) async {
+    // Validate format
+    if (data['_format'] != 'meshcore_wardrive_settings') {
+      throw FormatException('Not a valid MeshCore Wardrive settings file');
+    }
+    
+    final prefs = await SharedPreferences.getInstance();
+    int applied = 0;
+    
+    for (final key in _exportKeys) {
+      if (!data.containsKey(key)) continue;
+      final value = data[key];
+      if (value == null) continue;
+      
+      try {
+        if (value is bool) {
+          await prefs.setBool(key, value);
+        } else if (value is int) {
+          await prefs.setInt(key, value);
+        } else if (value is double) {
+          await prefs.setDouble(key, value);
+        } else if (value is String) {
+          await prefs.setString(key, value);
+        } else {
+          continue;
+        }
+        applied++;
+      } catch (_) {
+        // Skip invalid values
+      }
+    }
+    
+    return applied;
+  }
+  
+  /// Export settings as a formatted JSON string
+  Future<String> exportSettingsJson() async {
+    final data = await exportSettings();
+    return const JsonEncoder.withIndent('  ').convert(data);
+  }
+  
+  /// Import settings from a JSON string. Returns the number of settings applied.
+  Future<int> importSettingsJson(String jsonString) async {
+    final data = jsonDecode(jsonString) as Map<String, dynamic>;
+    return importSettings(data);
   }
 }

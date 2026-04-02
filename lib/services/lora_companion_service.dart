@@ -109,6 +109,9 @@ class LoRaCompanionService {
   int? get batteryPercent => _batteryPercent;
   Stream<int?> get batteryStream => _batteryController.stream;
 
+  /// Get the currently ignored repeater prefix
+  String? get ignoredRepeaterPrefix => _ignoredRepeaterPrefix;
+  
   /// Set repeater prefix to ignore (e.g., your mobile repeater)
   void setIgnoredRepeaterPrefix(String? prefix) {
     _ignoredRepeaterPrefix = prefix;
@@ -567,7 +570,7 @@ class LoRaCompanionService {
   }
 
   DateTime? _lastPingTime;
-  static const Duration _minPingInterval = Duration(seconds: 30);
+  static const Duration _minPingInterval = Duration(seconds: 5);
   
   /// Send Discovery ping to find nearby repeaters
   /// Uses MeshCore Discovery protocol (DISCOVER_REQ/DISCOVER_RESP)

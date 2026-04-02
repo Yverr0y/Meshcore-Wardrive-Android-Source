@@ -7,7 +7,7 @@ import 'dart:io';
 class DatabaseService {
   static Database? _database;
   static const String _databaseName = 'meshcore_wardrive.db';
-  static const int _databaseVersion = 8;
+  static const int _databaseVersion = 9;
   static const String tableDuctingCache = 'ducting_cache';
 
   static const String tableSamples = 'samples';
@@ -47,7 +47,8 @@ class DatabaseService {
         observerNames TEXT,
         uploaded INTEGER DEFAULT 0,
         response_time_ms INTEGER,
-        ducting_risk TEXT
+        ducting_risk TEXT,
+        source TEXT
       )
     ''');
 
@@ -181,6 +182,10 @@ class DatabaseService {
       await db.execute('''
         CREATE INDEX idx_ducting_timestamp ON $tableDuctingCache (timestamp)
       ''');
+    }
+    if (oldVersion < 9) {
+      await db.execute('ALTER TABLE $tableSamples ADD COLUMN source TEXT');
+      await db.execute('CREATE INDEX idx_samples_source ON $tableSamples (source)');
     }
   }
 
@@ -448,6 +453,27 @@ class DatabaseService {
       'pings': Sqflite.firstIntValue(pingResult) ?? 0,
       'successes': Sqflite.firstIntValue(successResult) ?? 0,
     };
+  }
+
+  /// Get all distinct source names from samples
+  Future<List<String>> getDistinctSources() async {
+    final db = await database;
+    final results = await db.rawQuery(
+      'SELECT DISTINCT source FROM $tableSamples WHERE source IS NOT NULL ORDER BY source',
+    );
+    return results.map((r) => r['source'] as String).toList();
+  }
+  
+  /// Get samples filtered by source
+  Future<List<Sample>> getSamplesBySource(String source) async {
+    final db = await database;
+    final maps = await db.query(
+      tableSamples,
+      where: 'source = ?',
+      whereArgs: [source],
+      orderBy: 'timestamp DESC',
+    );
+    return maps.map((map) => Sample.fromMap(map)).toList();
   }
 
   /// Close the database
