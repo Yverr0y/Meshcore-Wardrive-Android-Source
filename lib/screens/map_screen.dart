@@ -613,7 +613,7 @@ class _MapScreenState extends State<MapScreen> {
           fileName = 'meshcore_export_$timestamp.kml';
           break;
         default:
-          final data = await _locationService.exportSamples();
+          final data = await DatabaseService().exportAllData();
           content = jsonEncode(data);
           extension = 'json';
           fileName = 'meshcore_export_$timestamp.json';
@@ -730,64 +730,42 @@ $placemarks  </Document>
       
       if (result == null || result.files.isEmpty) return;
       
-      // Collect all samples from all files
-      final List<Map<String, dynamic>> allJsonData = [];
+      int totalSamplesImported = 0;
+      int totalSessionsImported = 0;
       final Set<String> sources = {};
       
       for (final pickedFile in result.files) {
         if (pickedFile.path == null) continue;
         final file = File(pickedFile.path!);
         final jsonString = await file.readAsString();
-        final List<dynamic> jsonData = jsonDecode(jsonString);
-        for (final item in jsonData) {
-          final map = item as Map<String, dynamic>;
-          allJsonData.add(map);
-          if (map['source'] != null) sources.add(map['source'] as String);
+        final dynamic jsonData = jsonDecode(jsonString);
+        
+        // Use unified import that handles both old (array) and new (object) formats
+        final counts = await DatabaseService().importAllData(jsonData);
+        totalSamplesImported += counts['samples'] ?? 0;
+        totalSessionsImported += counts['sessions'] ?? 0;
+        
+        // Extract sources for display
+        if (jsonData is Map<String, dynamic> && jsonData.containsKey('samples')) {
+          for (final s in (jsonData['samples'] as List<dynamic>)) {
+            final map = s as Map<String, dynamic>;
+            if (map['source'] != null) sources.add(map['source'] as String);
+          }
+        } else if (jsonData is List) {
+          for (final s in jsonData) {
+            final map = s as Map<String, dynamic>;
+            if (map['source'] != null) sources.add(map['source'] as String);
+          }
         }
       }
-      
-      if (allJsonData.isEmpty) {
-        _showSnackBar('No samples found in file(s)');
-        return;
-      }
-      
-      // Show merge summary before importing
-      if (!mounted) return;
-      final sourceLabel = sources.isNotEmpty
-          ? sources.join(', ')
-          : 'Unknown source';
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Import Wardrive Data'),
-          content: Text(
-            '${allJsonData.length} samples from ${result.files.length} file(s)\n'
-            'Source: $sourceLabel\n\n'
-            'Duplicate samples will be skipped automatically.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Import'),
-            ),
-          ],
-        ),
-      );
-      
-      if (confirmed != true) return;
-      
-      // Import samples
-      final importedCount = await _locationService.importSamples(allJsonData);
       
       // Reload map
       _lastAggregatedSampleCount = -1;
       await _loadSamples();
       
-      _showSnackBar('Imported $importedCount new samples from $sourceLabel');
+      final sourceLabel = sources.isNotEmpty ? ' from ${sources.join(', ')}' : '';
+      final sessionLabel = totalSessionsImported > 0 ? ', $totalSessionsImported sessions' : '';
+      _showSnackBar('Imported $totalSamplesImported samples$sessionLabel$sourceLabel');
     } catch (e) {
       _showSnackBar('Import failed: $e');
     }
@@ -799,15 +777,48 @@ $placemarks  </Document>
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final fileName = 'meshcore_settings_$timestamp.json';
       
-      // Save to a temp file and share
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/$fileName');
-      await file.writeAsString(jsonString);
-      
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text: 'MeshCore Wardrive Settings',
+      // Ask save or share
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Export Settings'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'save'),
+              child: const Text('Save to Folder'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'share'),
+              child: const Text('Share'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
       );
+      
+      if (choice == null) return;
+      
+      if (choice == 'save') {
+        await FilePicker.platform.saveFile(
+          dialogTitle: 'Save Settings',
+          fileName: fileName,
+          type: FileType.custom,
+          allowedExtensions: ['json'],
+          bytes: utf8.encode(jsonString),
+        );
+        _showSnackBar('Settings exported');
+      } else if (choice == 'share') {
+        final dir = await getApplicationDocumentsDirectory();
+        final file = File('${dir.path}/$fileName');
+        await file.writeAsString(jsonString);
+        await Share.shareXFiles(
+          [XFile(file.path)],
+          text: 'MeshCore Wardrive Settings',
+        );
+      }
     } catch (e) {
       _showSnackBar('Export failed: $e');
     }
@@ -2474,10 +2485,12 @@ $placemarks  </Document>
                 },
               ),
               ListTile(
-                title: const Text('Discovery Interval'),
+                title: const Text('Cycle Interval'),
+                subtitle: const Text('Time between discovery cycles'),
                 trailing: DropdownButton<int>(
                   value: _carpeaterInterval,
                   items: const [
+                    DropdownMenuItem(value: 0, child: Text('None')),
                     DropdownMenuItem(value: 5, child: Text('5s')),
                     DropdownMenuItem(value: 10, child: Text('10s')),
                     DropdownMenuItem(value: 15, child: Text('15s')),

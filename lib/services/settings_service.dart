@@ -183,7 +183,7 @@ class SettingsService {
   /// Get discovery timeout in seconds (10-30 seconds, default 20)
   Future<int> getDiscoveryTimeout() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_discoveryTimeoutKey) ?? 8;
+    return prefs.getInt(_discoveryTimeoutKey) ?? 20;
   }
   
   Future<void> setDiscoveryTimeout(int value) async {

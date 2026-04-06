@@ -225,6 +225,30 @@ class WSession {
   
   double get successRate => pingCount > 0 ? successCount / pingCount : 0.0;
 
+  Map<String, dynamic> toJson() => {
+        'startTime': startTime.toIso8601String(),
+        'endTime': endTime?.toIso8601String(),
+        'distanceMeters': distanceMeters,
+        'sampleCount': sampleCount,
+        'pingCount': pingCount,
+        'successCount': successCount,
+        'notes': notes,
+      };
+
+  factory WSession.fromJson(Map<String, dynamic> json) {
+    return WSession(
+      startTime: DateTime.parse(json['startTime'] as String),
+      endTime: json['endTime'] != null
+          ? DateTime.parse(json['endTime'] as String)
+          : null,
+      distanceMeters: (json['distanceMeters'] as num?)?.toDouble() ?? 0.0,
+      sampleCount: (json['sampleCount'] as int?) ?? 0,
+      pingCount: (json['pingCount'] as int?) ?? 0,
+      successCount: (json['successCount'] as int?) ?? 0,
+      notes: json['notes'] as String?,
+    );
+  }
+
   Map<String, dynamic> toMap() => {
         if (id != null) 'id': id,
         'start_time': startTime.millisecondsSinceEpoch,

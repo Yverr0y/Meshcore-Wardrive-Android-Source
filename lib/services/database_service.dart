@@ -361,6 +361,68 @@ class DatabaseService {
     final samples = await getAllSamples();
     return samples.map((s) => s.toJson()).toList();
   }
+  
+  /// Export all data (samples + sessions) as a unified JSON map
+  Future<Map<String, dynamic>> exportAllData() async {
+    final samples = await getAllSamples();
+    final sessions = await getAllSessions();
+    return {
+      '_format': 'meshcore_wardrive_data',
+      '_version': 1,
+      'samples': samples.map((s) => s.toJson()).toList(),
+      'sessions': sessions.map((s) => s.toJson()).toList(),
+    };
+  }
+  
+  /// Import data from unified format (samples + sessions).
+  /// Also handles legacy format (plain sample array).
+  /// Returns {samples: imported, sessions: imported}.
+  Future<Map<String, int>> importAllData(dynamic jsonData) async {
+    List<Map<String, dynamic>> samplesList;
+    List<Map<String, dynamic>> sessionsList = [];
+    
+    if (jsonData is Map<String, dynamic> && jsonData.containsKey('samples')) {
+      // New unified format
+      samplesList = (jsonData['samples'] as List<dynamic>).cast<Map<String, dynamic>>();
+      if (jsonData.containsKey('sessions')) {
+        sessionsList = (jsonData['sessions'] as List<dynamic>).cast<Map<String, dynamic>>();
+      }
+    } else if (jsonData is List) {
+      // Legacy format: plain array of samples
+      samplesList = jsonData.cast<Map<String, dynamic>>();
+    } else {
+      throw const FormatException('Unrecognized export format');
+    }
+    
+    // Import samples
+    final samplesImported = await importSamples(samplesList);
+    
+    // Import sessions (skip duplicates by start_time)
+    int sessionsImported = 0;
+    if (sessionsList.isNotEmpty) {
+      final db = await database;
+      for (final json in sessionsList) {
+        try {
+          final session = WSession.fromJson(json);
+          // Check for duplicate by start time
+          final existing = await db.query(
+            tableSessions,
+            where: 'start_time = ?',
+            whereArgs: [session.startTime.millisecondsSinceEpoch],
+            limit: 1,
+          );
+          if (existing.isEmpty) {
+            await db.insert(tableSessions, session.toMap());
+            sessionsImported++;
+          }
+        } catch (e) {
+          print('Error importing session: $e');
+        }
+      }
+    }
+    
+    return {'samples': samplesImported, 'sessions': sessionsImported};
+  }
 
   /// Import samples from JSON (skips duplicates by ID)
   Future<int> importSamples(List<Map<String, dynamic>> jsonData) async {

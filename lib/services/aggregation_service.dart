@@ -24,7 +24,7 @@ class AggregationService {
       };
     }
 
-    // Group samples by coverage area and analyze for contradictions
+    // Group samples by coverage area — only include cells with at least one ping
     final Map<String, List<Sample>> coverageToSamples = {};
     for (final sample in samples) {
       final coverageHash = GeohashUtils.coverageKey(
@@ -35,6 +35,11 @@ class AggregationService {
       coverageToSamples.putIfAbsent(coverageHash, () => []);
       coverageToSamples[coverageHash]!.add(sample);
     }
+    
+    // Remove cells that have ONLY GPS-only samples (no pings)
+    coverageToSamples.removeWhere((_, samples) =>
+      samples.every((s) => s.pingSuccess == null),
+    );
     
     // Aggregate samples into coverage areas with smart weighting
     for (final entry in coverageToSamples.entries) {

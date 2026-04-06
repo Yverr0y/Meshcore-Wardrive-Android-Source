@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.36 - 2026-04-06
+
+### Fixed
+- **Carpeater stale neighbours**: Neighbour table is now cleared before each discovery cycle. Previously the repeater returned cached neighbours from its home location even when driving far away, causing false green coverage squares.
+- **Empty gray coverage boxes**: Coverage cells with only GPS-only samples (no pings) are no longer rendered. Eliminates the gray boxes that appeared between ping samples, especially at short distance intervals.
+- **Settings export**: Now offers Save to Folder or Share options (was share-only)
+- **Ping timing reverted**: Discovery timeout back to 20s default, rate limit back to 30s (v1.0.33 behavior) to reduce false dead zones from aggressive timeouts
+
+### Added
+- **Session restore on import**: JSON exports now include session history alongside samples. Importing restores both — no more losing session records on reinstall. Backward compatible with old export files.
+- **Carpeater cycle interval "None"**: New option for back-to-back discovery cycles with zero gap between them
+
+### Improved
+- Carpeater settings UI: renamed "Discovery Interval" to "Cycle Interval" with descriptive subtitle
+- Data import handles both new unified format (`{samples, sessions}`) and legacy format (plain sample array)
+- Import shows session count in result message when sessions are restored
+
+### Technical
+- `WSession` model: added `toJson()`/`fromJson()` for session serialization
+- `DatabaseService`: new `exportAllData()` and `importAllData()` methods for unified export/import
+- `AggregationService`: filters out coverage cells where all samples are GPS-only (`pingSuccess == null`)
+- `CarpeaterService._runDiscoveryCycle()`: calls `_clearPreviousNeighbours()` before each discovery
+
 ## v1.0.35 - 2026-04-02
 
 ### Added

@@ -301,8 +301,12 @@ class CarpeaterService {
     try {
       _setState(CarpeaterState.discovering);
 
-      // Step 1: Trigger discovery (skip clearing — neighbours accumulate but
-      // we fetch a fresh snapshot each cycle anyway)
+      // Step 0: Clear stale neighbour table from previous cycle
+      // Without this, the repeater returns cached neighbours from wherever
+      // it was last located, not what it can hear RIGHT NOW
+      await _clearPreviousNeighbours();
+
+      // Step 1: Trigger discovery — tell repeater to send zero-hop advert
       final advertOk = await _triggerRepeaterAdvert();
       if (!advertOk) {
         _debugLog.logError('Carpeater: Could not trigger advert — skipping cycle');
