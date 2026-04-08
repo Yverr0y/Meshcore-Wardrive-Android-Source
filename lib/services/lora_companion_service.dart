@@ -570,7 +570,7 @@ class LoRaCompanionService {
   }
 
   DateTime? _lastPingTime;
-  static const Duration _minPingInterval = Duration(seconds: 30);
+  static const Duration _minPingInterval = Duration(seconds: 5);
   
   /// Send Discovery ping to find nearby repeaters
   /// Uses MeshCore Discovery protocol (DISCOVER_REQ/DISCOVER_RESP)

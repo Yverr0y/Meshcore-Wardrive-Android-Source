@@ -36,6 +36,7 @@ class SettingsService {
   static const String _carpeaterPasswordKey = 'carpeater_password';
   static const String _carpeaterIntervalKey = 'carpeater_interval_seconds';
   static const String _deviceNameKey = 'device_name';
+  static const String _lockRotationKey = 'lock_rotation_north';
   
   Future<bool> getShowSamples() async {
     final prefs = await SharedPreferences.getInstance();
@@ -439,6 +440,18 @@ class SettingsService {
     }
   }
   
+  /// Get lock rotation north setting
+  Future<bool> getLockRotationNorth() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_lockRotationKey) ?? false;
+  }
+  
+  /// Set lock rotation north setting
+  Future<void> setLockRotationNorth(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_lockRotationKey, value);
+  }
+  
   /// All preference keys that should be exported/imported
   static const List<String> _exportKeys = [
     _showSamplesKey,
@@ -475,6 +488,7 @@ class SettingsService {
     _carpeaterPasswordKey,
     _carpeaterIntervalKey,
     _deviceNameKey,
+    _lockRotationKey,
     // Upload service keys
     'upload_api_url',
     'auto_upload_enabled',

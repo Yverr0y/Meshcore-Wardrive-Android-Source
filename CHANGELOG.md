@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.37 - 2026-04-08
+
+### Fixed
+- **Coverage gaps eliminated**: Rate limit reduced from 30s to 5s — at 50m distance pings, coverage squares are now continuous with no large gaps
+- **Coverage resolution setting**: Changing precision now properly invalidates the aggregation cache and rebuilds the map
+- **Web map wrong success rates**: GPS-only samples (no ping attempted) are now filtered from uploads — previously they inflated failure counts on the live map
+- **Prediction rings blocking taps**: Rings now render behind coverage squares and repeater icons so they don't intercept touch events
+- **Lock rotation persistence**: Map rotation lock setting now persists across app restarts
+
+### Added
+- **Ping time interval 5s and 10s options**: Time-based ping interval dropdown now includes 5s and 10s for more aggressive coverage in "Both" mode
+
+### Improved
+- **Map performance when zoomed in**: Auto-follow throttled to every 2 seconds (was every GPS update ~1/sec), distance/speed updates no longer trigger full map rebuilds, and the 5-second refresh skips setState entirely when nothing changed
+- **Carpeater message passthrough**: Confirmed that received/sent messages work while in carpeater mode (by design — logged into the repeater)
+
+### Technical
+- Auto-follow uses `_autoFollowInterval` throttle to reduce `_mapController.move()` calls
+- Distance/speed stream listeners update values silently without setState
+- `_loadSamples` no-change path compares all state fields before calling setState
+- Upload service filters `pingSuccess == null` samples in both single and multi-endpoint paths
+- Web map `samples.js` also skips GPS-only samples in `aggregateSamples()`
+
 ## v1.0.36 - 2026-04-06
 
 ### Fixed

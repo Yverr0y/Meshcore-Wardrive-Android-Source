@@ -95,9 +95,13 @@ class UploadService {
     try {
       final apiUrl = await getApiUrl();
       final bool isDefault = _isDefaultEndpoint(apiUrl);
-      final samples = isDefault
+      final allSamples = isDefault
           ? await _db.getUnuploadedSamples()
           : await _db.getAllSamples();
+      
+      // Only upload actual ping samples — GPS-only (pingSuccess=null) samples
+      // would be counted as failures by the web map
+      final samples = allSamples.where((s) => s.pingSuccess != null).toList();
       
       if (samples.isEmpty) {
         return UploadResult(success: true, message: 'No new samples to upload');
@@ -171,10 +175,10 @@ class UploadService {
       // All batches successful
       await _setLastUploadTime(DateTime.now());
       
-      // Mark samples as uploaded only for the default endpoint
-      final sampleIds = samples.map((s) => s.id).toList();
+      // Mark ALL samples (including GPS-only) as uploaded so they don't get re-queried
+      final allSampleIds = allSamples.map((s) => s.id).toList();
       if (isDefault) {
-        await _db.markSamplesAsUploaded(sampleIds);
+        await _db.markSamplesAsUploaded(allSampleIds);
       }
       
       return UploadResult(
@@ -268,9 +272,16 @@ class UploadService {
       if (selectedNames.contains(endpoint.name)) {
         try {
           // Get samples not yet uploaded to this specific endpoint
-          final samples = await _db.getUnuploadedSamplesForEndpoint(endpoint.url);
+          final allSamples = await _db.getUnuploadedSamplesForEndpoint(endpoint.url);
+          // Only upload actual ping samples — GPS-only inflate failure counts on web map
+          final samples = allSamples.where((s) => s.pingSuccess != null).toList();
           
           if (samples.isEmpty) {
+            // Still mark GPS-only samples as uploaded so they don't get re-queried
+            if (allSamples.isNotEmpty) {
+              final ids = allSamples.map((s) => s.id).toList();
+              await _db.markSamplesAsUploadedToEndpoint(ids, endpoint.url);
+            }
             results[endpoint.name] = UploadResult(
               success: true,
               message: 'No new samples to upload',
@@ -291,14 +302,14 @@ class UploadService {
           
           results[endpoint.name] = result;
           
-          // Mark samples as uploaded to this specific endpoint
+          // Mark ALL samples (including GPS-only) as uploaded to this endpoint
           if (result.success) {
-            final sampleIds = samples.map((s) => s.id).toList();
-            await _db.markSamplesAsUploadedToEndpoint(sampleIds, endpoint.url);
+            final allSampleIds = allSamples.map((s) => s.id).toList();
+            await _db.markSamplesAsUploadedToEndpoint(allSampleIds, endpoint.url);
             
             // Also update old uploaded flag for backward compatibility (default endpoint only)
             if (_isDefaultEndpoint(endpoint.url)) {
-              await _db.markSamplesAsUploaded(sampleIds);
+              await _db.markSamplesAsUploaded(allSampleIds);
             }
           }
         } catch (e) {

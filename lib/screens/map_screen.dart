@@ -141,6 +141,10 @@ class _MapScreenState extends State<MapScreen> {
   // Source filter for multi-device wardrive
   String? _activeSourceFilter;
   
+  // Auto-follow throttle
+  DateTime _lastAutoFollowMove = DateTime.now();
+  static const _autoFollowInterval = Duration(seconds: 2);
+  
   // Coverage prediction rings
   bool _showPredictionRings = false;
   
@@ -196,13 +200,16 @@ class _MapScreenState extends State<MapScreen> {
     
     // Subscribe to position updates
     _positionSubscription = _locationService.currentPositionStream.listen((position) {
-      setState(() {
-        _currentPosition = position;
-      });
+      if (!mounted) return;
+      _currentPosition = position;
       
-      // Auto-follow if enabled
+      // Auto-follow if enabled (throttled to reduce map redraws)
       if (_followLocation && position != null) {
-        _mapController.move(position, _mapController.camera.zoom);
+        final now = DateTime.now();
+        if (now.difference(_lastAutoFollowMove) >= _autoFollowInterval) {
+          _lastAutoFollowMove = now;
+          _mapController.move(position, _mapController.camera.zoom);
+        }
       }
     });
     
@@ -228,25 +235,21 @@ class _MapScreenState extends State<MapScreen> {
       }
     });
     
-    // Subscribe to distance updates
+    // Subscribe to distance updates (no setState — updated in _loadSamples cycle)
     _distanceSubscription = _locationService.totalDistanceStream.listen((distance) {
       if (mounted) {
-        setState(() {
-          _totalDistance = _distanceUnit == 'miles' 
-              ? _locationService.totalDistanceMiles 
-              : _locationService.totalDistanceKm;
-        });
+        _totalDistance = _distanceUnit == 'miles' 
+            ? _locationService.totalDistanceMiles 
+            : _locationService.totalDistanceKm;
       }
     });
     
-    // Subscribe to speed updates
+    // Subscribe to speed updates (no setState — updated in _loadSamples cycle)
     _speedSubscription = _locationService.speedStream.listen((speed) {
       if (mounted) {
-        setState(() {
-          _currentSpeed = _distanceUnit == 'miles'
-              ? _locationService.currentSpeedMph
-              : _locationService.currentSpeedKmh;
-        });
+        _currentSpeed = _distanceUnit == 'miles'
+            ? _locationService.currentSpeedMph
+            : _locationService.currentSpeedKmh;
       }
     });
     
@@ -321,6 +324,12 @@ class _MapScreenState extends State<MapScreen> {
     });
     SoundService().setEnabled(soundEnabled);
     SoundService().setVibrationEnabled(vibrationEnabled);
+    
+    // Load lock rotation
+    final lockRotation = await _settingsService.getLockRotationNorth();
+    setState(() {
+      _lockRotationNorth = lockRotation;
+    });
     
     // Load Carpeater settings
     final carpeaterEnabled = await _settingsService.getCarpeaterEnabled();
@@ -409,13 +418,16 @@ class _MapScreenState extends State<MapScreen> {
         _repeaters = repeaterMap.values.toList();
       });
     } else {
-      // Just update connection status and auto-ping state (cheap)
-      setState(() {
-        _sampleCount = count;
-        _loraConnected = isConnected;
-        _connectionType = connType;
-        _autoPingEnabled = _locationService.isAutoPingEnabled;
-      });
+      // Just update connection status and auto-ping state if changed
+      final newAutoPing = _locationService.isAutoPingEnabled;
+      if (_loraConnected != isConnected || _connectionType != connType || _autoPingEnabled != newAutoPing || _sampleCount != count) {
+        setState(() {
+          _sampleCount = count;
+          _loraConnected = isConnected;
+          _connectionType = connType;
+          _autoPingEnabled = newAutoPing;
+        });
+      }
     }
     
     // Update ducting badge if enabled
@@ -1169,11 +1181,11 @@ $placemarks  </Document>
         ),
         if (_showRouteTrail) _buildRouteTrailLayer(),
         if (_showHeatmap) _buildHeatmapLayer(),
+        if (_showPredictionRings) _buildPredictionRingsLayer(),
         if (_showCoverage) ..._buildCoverageLayers(),
         if (_showSamples) _buildSampleLayer(),
         if (_showEdges) _buildEdgeLayer(),
         if (_showRepeaters) _buildRepeaterLayer(),
-        if (_showPredictionRings) _buildPredictionRingsLayer(),
         if (_currentPosition != null && !_hideUIForScreenshot) _buildCurrentLocationLayer(),
       ],
     );
@@ -2103,7 +2115,8 @@ $placemarks  </Document>
         _coveragePrecision = precision;
       });
       await _settingsService.setCoveragePrecision(precision);
-      // Reload samples with new precision
+      // Force reaggregation with new precision
+      _lastAggregatedSampleCount = -1;
       await _loadSamples();
       _showSnackBar('Coverage resolution: ${_getCoverageResolutionDescription()}');
     }
@@ -2309,11 +2322,12 @@ $placemarks  </Document>
               title: const Text('Show Successful Pings Only'),
               subtitle: const Text('Hide failed pings and GPS-only samples'),
               value: _showSuccessfulOnly,
-              onChanged: (value) {
+              onChanged: (value) async {
                 setState(() {
-                  _showSuccessfulOnly = value;
+                  _lockRotationNorth = value;
                 });
                 setModalState(() {});
+                await _settingsService.setLockRotationNorth(value);
               },
             ),
             SwitchListTile(
@@ -2546,11 +2560,12 @@ $placemarks  </Document>
               title: const Text('Lock Map Rotation'),
               subtitle: const Text('Prevent map rotation'),
               value: _lockRotationNorth,
-              onChanged: (value) {
+              onChanged: (value) async {
                 setState(() {
                   _lockRotationNorth = value;
                 });
                 setModalState(() {});
+                await _settingsService.setLockRotationNorth(value);
               },
             ),
             ListTile(
@@ -2747,6 +2762,8 @@ $placemarks  </Document>
                 trailing: DropdownButton<int>(
                   value: _pingTimeInterval,
                   items: const [
+                    DropdownMenuItem(value: 5, child: Text('5s')),
+                    DropdownMenuItem(value: 10, child: Text('10s')),
                     DropdownMenuItem(value: 15, child: Text('15s')),
                     DropdownMenuItem(value: 30, child: Text('30s')),
                     DropdownMenuItem(value: 60, child: Text('60s')),
