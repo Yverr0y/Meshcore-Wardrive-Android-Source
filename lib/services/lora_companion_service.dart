@@ -570,11 +570,11 @@ class LoRaCompanionService {
   }
 
   DateTime? _lastPingTime;
-  static const Duration _minPingInterval = Duration(seconds: 5);
   
   /// Send Discovery ping to find nearby repeaters
   /// Uses MeshCore Discovery protocol (DISCOVER_REQ/DISCOVER_RESP)
-  /// Note: Repeaters rate-limit responses to 4 per 2 minutes
+  /// Note: _pingInProgress in LocationService prevents overlapping pings.
+  /// No additional rate limit — matches v1.0.33 behavior for fastest coverage.
   Future<PingResult> ping({
     double? latitude,
     double? longitude,
@@ -594,16 +594,6 @@ class LoRaCompanionService {
         status: PingStatus.failed,
         error: 'No GPS location',
       );
-    }
-    
-    // Enforce rate limiting - don't ping too frequently
-    if (_lastPingTime != null) {
-      final timeSinceLastPing = DateTime.now().difference(_lastPingTime!);
-      if (timeSinceLastPing < _minPingInterval) {
-        final waitTime = _minPingInterval - timeSinceLastPing;
-        _debugLog.logInfo('⏳ Rate limit: waiting ${waitTime.inSeconds}s before ping');
-        await Future.delayed(waitTime);
-      }
     }
 
     try {

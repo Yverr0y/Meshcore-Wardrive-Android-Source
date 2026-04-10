@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.37.1 - 2026-04-10
+
+### Fixed
+- **Coverage gaps eliminated**: Removed `_pingInProgress` guard from distance-based pings, restoring v1.0.33 behavior. Distance pings now fire immediately on every threshold trigger, allowing overlapping pings for dense coverage. Each ping uses a unique discovery tag so responses correlate correctly.
+- **Rate limit fully removed**: No artificial delay between pings — `_pingInProgress` is only used for time-based ping deduplication, not distance pings.
+
 ## v1.0.37 - 2026-04-08
 
 ### Fixed

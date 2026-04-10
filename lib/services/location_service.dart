@@ -531,9 +531,10 @@ class LocationService {
         }
       }
       
-      if (shouldPing && !_pingInProgress) {
-        // Update last ping position immediately to prevent multiple pings
-        _pingInProgress = true;
+      if (shouldPing) {
+        // Fire ping immediately — no _pingInProgress guard.
+        // v1.0.33 allowed overlapping pings for dense coverage.
+        // Each ping has a unique discovery tag so responses correlate correctly.
         _lastPingPosition = latLng;
         _lastPingTimestamp = DateTime.now();
         await _logger.logPingEvent('Distance-based ping triggered at ${latLng.latitude}, ${latLng.longitude}');
