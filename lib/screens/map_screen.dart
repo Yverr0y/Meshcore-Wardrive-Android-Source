@@ -160,6 +160,12 @@ class _MapScreenState extends State<MapScreen> {
   String _pingMode = 'distance';
   int _pingTimeInterval = 60;
   
+  // Planned repeater markers
+  List<Map<String, dynamic>> _plannedMarkers = [];
+  
+  // Delete mode
+  bool _deleteMode = false;
+  
   // Carpeater mode
   bool _carpeaterEnabled = false;
   String? _carpeaterRepeaterId;
@@ -184,6 +190,9 @@ class _MapScreenState extends State<MapScreen> {
     
     // Load saved settings
     await _loadSettings();
+    
+    // Load planned markers
+    await _loadMarkers();
     
     // Subscribe to battery updates
     final loraService = _locationService.loraCompanion;
@@ -325,10 +334,12 @@ class _MapScreenState extends State<MapScreen> {
     SoundService().setEnabled(soundEnabled);
     SoundService().setVibrationEnabled(vibrationEnabled);
     
-    // Load lock rotation
+    // Load lock rotation and successful-only filter
     final lockRotation = await _settingsService.getLockRotationNorth();
+    final showSuccessfulOnly = await _settingsService.getShowSuccessfulOnly();
     setState(() {
       _lockRotationNorth = lockRotation;
+      _showSuccessfulOnly = showSuccessfulOnly;
     });
     
     // Load Carpeater settings
@@ -890,6 +901,180 @@ $placemarks  </Document>
     }
   }
 
+  // ============================================================================
+  // PLANNED MARKERS
+  // ============================================================================
+  
+  Future<void> _loadMarkers() async {
+    final markers = await DatabaseService().getAllMarkers();
+    setState(() { _plannedMarkers = markers; });
+  }
+  
+  void _handleMapLongPress(LatLng point) async {
+    final controller = TextEditingController();
+    final label = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Planned Repeater'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Label (optional)',
+                hintText: 'e.g., Hilltop near Tracyton',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Add Marker'),
+          ),
+        ],
+      ),
+    );
+    
+    if (label != null) {
+      await DatabaseService().addMarker(
+        point.latitude, point.longitude,
+        label.isEmpty ? null : label,
+      );
+      await _loadMarkers();
+      _showSnackBar('Planned repeater marker added');
+    }
+  }
+  
+  void _showMarkerInfo(Map<String, dynamic> marker) {
+    final lat = marker['lat'] as double;
+    final lon = marker['lon'] as double;
+    final label = marker['label'] as String?;
+    final id = marker['id'] as int;
+    final createdAt = DateTime.fromMillisecondsSinceEpoch(marker['created_at'] as int);
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(label ?? 'Planned Repeater'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Lat: ${lat.toStringAsFixed(6)}'),
+            Text('Lon: ${lon.toStringAsFixed(6)}'),
+            Text('Added: ${DateFormat('MMM d, yyyy').format(createdAt)}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await DatabaseService().deleteMarker(id);
+              await _loadMarkers();
+              _showSnackBar('Marker deleted');
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildPlannedMarkersLayer() {
+    if (_plannedMarkers.isEmpty) return const SizedBox.shrink();
+    
+    final markers = _plannedMarkers.map((m) {
+      final lat = m['lat'] as double;
+      final lon = m['lon'] as double;
+      final label = m['label'] as String?;
+      
+      return Marker(
+        point: LatLng(lat, lon),
+        width: 36,
+        height: 36,
+        child: GestureDetector(
+          onTap: () => _showMarkerInfo(m),
+          child: const Icon(
+            Icons.add_location,
+            color: Colors.amber,
+            size: 36,
+          ),
+        ),
+      );
+    }).toList();
+    
+    return MarkerLayer(markers: markers);
+  }
+  
+  // ============================================================================
+  // DELETE MODE
+  // ============================================================================
+  
+  void _deleteSample(Sample sample) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Sample'),
+        content: Text(
+          'Delete this ${sample.pingSuccess == true ? "successful" : sample.pingSuccess == false ? "failed" : "GPS-only"} '
+          'sample from ${DateFormat('MMM d HH:mm').format(sample.timestamp)}?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed == true) {
+      await DatabaseService().deleteSample(sample.id);
+      _lastAggregatedSampleCount = -1;
+      await _loadSamples();
+      _showSnackBar('Sample deleted');
+    }
+  }
+  
+  void _deleteCoverageCell(Coverage coverage) async {
+    final total = (coverage.received + coverage.lost).round();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Coverage Cell'),
+        content: Text(
+          'Delete all $total samples in this coverage area?\n\n'
+          'Cell: ${coverage.id}\n'
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete All', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed == true) {
+      final deleted = await DatabaseService().deleteSamplesByGeohash(coverage.id);
+      _lastAggregatedSampleCount = -1;
+      await _loadSamples();
+      _showSnackBar('Deleted $deleted samples from cell');
+    }
+  }
+
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
@@ -1103,6 +1288,33 @@ $placemarks  </Document>
           children: [
             _buildMap(),
             if (!_hideUIForScreenshot) _buildControlPanel(),
+            if (_deleteMode)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  color: Colors.red.withValues(alpha: 0.9),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: SafeArea(
+                    bottom: false,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.delete, color: Colors.white, size: 18),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text('DELETE MODE: Tap a coverage square or sample to delete',
+                              style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                        TextButton(
+                          onPressed: () => setState(() => _deleteMode = false),
+                          child: const Text('EXIT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -1153,6 +1365,7 @@ $placemarks  </Document>
               ? InteractiveFlag.all & ~InteractiveFlag.rotate  // Disable rotation
               : InteractiveFlag.all,  // Allow all interactions
         ),
+        onLongPress: (tapPosition, point) => _handleMapLongPress(point),
         onMapEvent: (event) {
           // Disable follow mode if user manually pans/drags the map
           if (event is MapEventMoveStart && event.source == MapEventSource.mapController) {
@@ -1186,6 +1399,7 @@ $placemarks  </Document>
         if (_showSamples) _buildSampleLayer(),
         if (_showEdges) _buildEdgeLayer(),
         if (_showRepeaters) _buildRepeaterLayer(),
+        _buildPlannedMarkersLayer(),
         if (_currentPosition != null && !_hideUIForScreenshot) _buildCurrentLocationLayer(),
       ],
     );
@@ -1334,7 +1548,7 @@ $placemarks  </Document>
           width: 100,
           height: 100,
           child: GestureDetector(
-            onTap: () => _showCoverageInfo(coverage),
+            onTap: () => _deleteMode ? _deleteCoverageCell(coverage) : _showCoverageInfo(coverage),
             child: Container(color: Colors.transparent),
           ),
         ),
@@ -1396,7 +1610,7 @@ $placemarks  </Document>
         width: 12,
         height: 12,
         child: GestureDetector(
-          onTap: () => _showSampleInfo(sample),
+          onTap: () => _deleteMode ? _deleteSample(sample) : _showSampleInfo(sample),
           child: Container(
             width: 6,
             height: 6,
@@ -2324,10 +2538,10 @@ $placemarks  </Document>
               value: _showSuccessfulOnly,
               onChanged: (value) async {
                 setState(() {
-                  _lockRotationNorth = value;
+                  _showSuccessfulOnly = value;
                 });
                 setModalState(() {});
-                await _settingsService.setLockRotationNorth(value);
+                await _settingsService.setShowSuccessfulOnly(value);
               },
             ),
             SwitchListTile(
@@ -3150,6 +3364,47 @@ $placemarks  </Document>
                 Navigator.pop(context);
                 _findCoverageGaps();
               },
+            ),
+            ListTile(
+              title: const Text('Delete Mode'),
+              subtitle: const Text('Tap to delete individual samples or cells'),
+              leading: const Icon(Icons.delete_sweep, color: Colors.orange),
+              onTap: () {
+                Navigator.pop(context);
+                setState(() { _deleteMode = true; });
+                _showSnackBar('Delete mode ON — tap a coverage square or sample to delete');
+              },
+            ),
+            ListTile(
+              title: const Text('Planned Repeaters'),
+              subtitle: Text('${_plannedMarkers.length} marker(s) — long-press map to add'),
+              leading: const Icon(Icons.add_location, color: Colors.amber),
+              trailing: _plannedMarkers.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, color: Colors.red, size: 20),
+                      onPressed: () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Clear All Markers'),
+                            content: const Text('Remove all planned repeater markers?'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                              TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Clear', style: TextStyle(color: Colors.red))),
+                            ],
+                          ),
+                        );
+                        if (confirmed == true) {
+                          for (final m in _plannedMarkers) {
+                            await DatabaseService().deleteMarker(m['id'] as int);
+                          }
+                          await _loadMarkers();
+                          setModalState(() {});
+                          _showSnackBar('All markers cleared');
+                        }
+                      },
+                    )
+                  : null,
             ),
             ListTile(
               title: const Text('Clear Map'),

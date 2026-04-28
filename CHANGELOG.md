@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.38 - 2026-04-28
+
+### Added
+- **Planned Repeater Markers**: Long-press anywhere on the map to place a marker for a potential repeater location. Add an optional label, tap to view details or delete. Markers persist in the database.
+- **Delete Mode**: Remove bad data before uploading. Activate from Data Management menu, then tap a coverage square to delete all samples in that cell, or tap individual sample dots to remove one at a time. Red banner shows when active.
+- **Planned Repeaters menu entry**: Shows marker count with option to clear all markers
+
+### Fixed
+- **Show Successful Pings Only toggle**: Was incorrectly writing to map rotation setting instead of the filter. Now works correctly and persists across restarts.
+
+### Technical
+- Database version 9 → 10: new `planned_markers` table
+- `DatabaseService`: added marker CRUD methods, `deleteSample()`, `deleteSamplesByGeohash()`
+- `SettingsService`: added `showSuccessfulOnly` persistence + export key
+- Map long-press handler for marker placement
+- Delete mode routing in sample and coverage tap handlers
+
 ## v1.0.37.1 - 2026-04-10
 
 ### Fixed

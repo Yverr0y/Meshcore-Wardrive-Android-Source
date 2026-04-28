@@ -37,6 +37,7 @@ class SettingsService {
   static const String _carpeaterIntervalKey = 'carpeater_interval_seconds';
   static const String _deviceNameKey = 'device_name';
   static const String _lockRotationKey = 'lock_rotation_north';
+  static const String _showSuccessfulOnlyKey = 'show_successful_only';
   
   Future<bool> getShowSamples() async {
     final prefs = await SharedPreferences.getInstance();
@@ -440,6 +441,16 @@ class SettingsService {
     }
   }
   
+  Future<bool> getShowSuccessfulOnly() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_showSuccessfulOnlyKey) ?? false;
+  }
+  
+  Future<void> setShowSuccessfulOnly(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_showSuccessfulOnlyKey, value);
+  }
+  
   /// Get lock rotation north setting
   Future<bool> getLockRotationNorth() async {
     final prefs = await SharedPreferences.getInstance();
@@ -489,6 +500,7 @@ class SettingsService {
     _carpeaterIntervalKey,
     _deviceNameKey,
     _lockRotationKey,
+    _showSuccessfulOnlyKey,
     // Upload service keys
     'upload_api_url',
     'auto_upload_enabled',

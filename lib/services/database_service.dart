@@ -7,12 +7,13 @@ import 'dart:io';
 class DatabaseService {
   static Database? _database;
   static const String _databaseName = 'meshcore_wardrive.db';
-  static const int _databaseVersion = 9;
+  static const int _databaseVersion = 10;
   static const String tableDuctingCache = 'ducting_cache';
 
   static const String tableSamples = 'samples';
   static const String tableUploads = 'uploads';
   static const String tableSessions = 'sessions';
+  static const String tableMarkers = 'planned_markers';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -108,6 +109,17 @@ class DatabaseService {
         notes TEXT
       )
     ''');
+    
+    // Create planned markers table
+    await db.execute('''
+      CREATE TABLE $tableMarkers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL,
+        label TEXT,
+        created_at INTEGER NOT NULL
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -186,6 +198,17 @@ class DatabaseService {
     if (oldVersion < 9) {
       await db.execute('ALTER TABLE $tableSamples ADD COLUMN source TEXT');
       await db.execute('CREATE INDEX idx_samples_source ON $tableSamples (source)');
+    }
+    if (oldVersion < 10) {
+      await db.execute('''
+        CREATE TABLE $tableMarkers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lat REAL NOT NULL,
+          lon REAL NOT NULL,
+          label TEXT,
+          created_at INTEGER NOT NULL
+        )
+      ''');
     }
   }
 
@@ -536,6 +559,60 @@ class DatabaseService {
       orderBy: 'timestamp DESC',
     );
     return maps.map((map) => Sample.fromMap(map)).toList();
+  }
+
+  // ============================================================================
+  // PLANNED MARKERS
+  // ============================================================================
+  
+  /// Add a planned repeater marker
+  Future<int> addMarker(double lat, double lon, String? label) async {
+    final db = await database;
+    return await db.insert(tableMarkers, {
+      'lat': lat,
+      'lon': lon,
+      'label': label,
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+  
+  /// Get all planned markers
+  Future<List<Map<String, dynamic>>> getAllMarkers() async {
+    final db = await database;
+    return await db.query(tableMarkers, orderBy: 'created_at DESC');
+  }
+  
+  /// Delete a planned marker by ID
+  Future<void> deleteMarker(int id) async {
+    final db = await database;
+    await db.delete(tableMarkers, where: 'id = ?', whereArgs: [id]);
+  }
+  
+  /// Update a marker's label
+  Future<void> updateMarkerLabel(int id, String? label) async {
+    final db = await database;
+    await db.update(tableMarkers, {'label': label}, where: 'id = ?', whereArgs: [id]);
+  }
+  
+  // ============================================================================
+  // DELETE DATA
+  // ============================================================================
+  
+  /// Delete a single sample by ID
+  Future<void> deleteSample(String sampleId) async {
+    final db = await database;
+    await db.delete(tableSamples, where: 'id = ?', whereArgs: [sampleId]);
+  }
+  
+  /// Delete all samples in a coverage cell (by geohash prefix)
+  /// Uses the coverage precision to match the cell
+  Future<int> deleteSamplesByGeohash(String geohashPrefix) async {
+    final db = await database;
+    return await db.delete(
+      tableSamples,
+      where: 'geohash LIKE ?',
+      whereArgs: ['$geohashPrefix%'],
+    );
   }
 
   /// Close the database
