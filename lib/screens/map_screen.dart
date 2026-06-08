@@ -41,7 +41,9 @@ import '../services/carpeater_service.dart';
 import '../services/sound_service.dart';
 import '../services/tile_download_service.dart';
 import 'analytics_screen.dart';
+import 'achievements_screen.dart';
 import 'repeater_health_screen.dart';
+import '../services/achievement_service.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -88,6 +90,8 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<String>? _pingEventSubscription;
   StreamSubscription<double>? _distanceSubscription;
   StreamSubscription<double>? _speedSubscription;
+  StreamSubscription<String>? _newRepeaterSubscription;
+  StreamSubscription<String>? _deadZoneSubscription;
   
   // Ping visual indicator
   bool _showPingPulse = false;
@@ -166,6 +170,16 @@ class _MapScreenState extends State<MapScreen> {
   // Delete mode
   bool _deleteMode = false;
   
+  // Privacy zones
+  List<Map<String, dynamic>> _privacyZones = [];
+  
+  // Battery saver mode
+  bool _batterySaverActive = false;
+  StreamSubscription<bool>? _batterySaverSubscription;
+  
+  // Quick settings overlay
+  bool _showQuickSettings = false;
+  
   // Carpeater mode
   bool _carpeaterEnabled = false;
   String? _carpeaterRepeaterId;
@@ -191,8 +205,9 @@ class _MapScreenState extends State<MapScreen> {
     // Load saved settings
     await _loadSettings();
     
-    // Load planned markers
+    // Load planned markers and privacy zones
     await _loadMarkers();
+    await _loadPrivacyZones();
     
     // Subscribe to battery updates
     final loraService = _locationService.loraCompanion;
@@ -243,6 +258,41 @@ class _MapScreenState extends State<MapScreen> {
         });
       }
     });
+    
+    // Subscribe to new repeater discovery alerts
+    _newRepeaterSubscription = _locationService.loraCompanion.newRepeaterStream.listen((repeaterId) {
+      if (mounted) {
+        SoundService().playPingSuccessGood();
+        _showSnackBar('🆕 New repeater discovered: $repeaterId');
+      }
+    });
+    
+    // Subscribe to dead zone alerts
+    _deadZoneSubscription = _locationService.deadZoneStream.listen((cellHash) {
+      if (mounted) {
+        _showSnackBar('⚠️ Entering known dead zone ($cellHash)');
+      }
+    });
+    
+    // Subscribe to battery saver mode changes
+    _batterySaverSubscription = _locationService.batterySaverStream.listen((active) {
+      if (mounted) {
+        setState(() { _batterySaverActive = active; });
+        _showSnackBar(active
+            ? '🔋 Battery saver ON — ping interval doubled'
+            : '🔋 Battery saver OFF — normal ping interval restored');
+      }
+    });
+    
+    // Subscribe to achievement unlocks
+    AchievementService().unlockStream.listen((achievement) {
+      if (mounted) {
+        _showSnackBar('🏆 Achievement unlocked: ${achievement.icon} ${achievement.title}');
+      }
+    });
+    
+    // Check achievements on startup
+    AchievementService().checkAndUnlock();
     
     // Subscribe to distance updates (no setState — updated in _loadSamples cycle)
     _distanceSubscription = _locationService.totalDistanceStream.listen((distance) {
@@ -484,6 +534,8 @@ class _MapScreenState extends State<MapScreen> {
         _isTracking = false;
         _autoPingEnabled = false;
       });
+      // Check for newly unlocked achievements
+      AchievementService().checkAndUnlock();
     } else {
       // Start tracking
       final started = await _locationService.startTracking();
@@ -636,7 +688,12 @@ class _MapScreenState extends State<MapScreen> {
           fileName = 'meshcore_export_$timestamp.kml';
           break;
         default:
-          final data = await DatabaseService().exportAllData();
+          // Include discovered repeater contacts in the export
+          final repeaterJsonList = _repeaters
+              .where((r) => r.position.latitude != 0.0 || r.position.longitude != 0.0)
+              .map((r) => r.toJson())
+              .toList();
+          final data = await DatabaseService().exportAllData(repeaters: repeaterJsonList);
           content = jsonEncode(data);
           extension = 'json';
           fileName = 'meshcore_export_$timestamp.json';
@@ -1016,6 +1073,93 @@ $placemarks  </Document>
   }
   
   // ============================================================================
+  // PRIVACY ZONES
+  // ============================================================================
+  
+  Future<void> _loadPrivacyZones() async {
+    final zones = await DatabaseService().getAllPrivacyZones();
+    setState(() { _privacyZones = zones; });
+  }
+  
+  Future<void> _addPrivacyZone(LatLng center) async {
+    final radiusOptions = [
+      {'label': '500m (~0.3 mi)', 'meters': 500.0},
+      {'label': '1 km (~0.6 mi)', 'meters': 1000.0},
+      {'label': '2 km (~1.2 mi)', 'meters': 2000.0},
+      {'label': '5 km (~3 mi)', 'meters': 5000.0},
+    ];
+    double selectedRadius = 1000.0;
+    final labelController = TextEditingController();
+    
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Add Privacy Zone'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Center: ${center.latitude.toStringAsFixed(5)}, ${center.longitude.toStringAsFixed(5)}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 8),
+              const Text('Data inside this zone will be excluded from uploads and exports.',
+                  style: TextStyle(fontSize: 12)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: labelController,
+                decoration: const InputDecoration(labelText: 'Label (optional)', hintText: 'e.g., Home'),
+              ),
+              const SizedBox(height: 12),
+              const Text('Radius:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              ...radiusOptions.map((opt) => RadioListTile<double>(
+                title: Text(opt['label'] as String),
+                value: opt['meters'] as double,
+                groupValue: selectedRadius,
+                onChanged: (v) => setDialogState(() => selectedRadius = v!),
+                dense: true,
+              )),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add Zone')),
+          ],
+        ),
+      ),
+    );
+    
+    if (confirmed == true) {
+      await DatabaseService().addPrivacyZone(
+        center.latitude, center.longitude, selectedRadius,
+        labelController.text.isEmpty ? null : labelController.text,
+      );
+      await _loadPrivacyZones();
+      _showSnackBar('Privacy zone added');
+    }
+  }
+  
+  Widget _buildPrivacyZonesLayer() {
+    if (_privacyZones.isEmpty) return const SizedBox.shrink();
+    
+    final polygons = <Polygon>[];
+    for (final zone in _privacyZones) {
+      final center = LatLng(zone['lat'] as double, zone['lon'] as double);
+      final radius = zone['radius_meters'] as double;
+      final points = _circlePoints(center, radius, segments: 48);
+      polygons.add(Polygon(
+        points: points,
+        color: Colors.grey.withValues(alpha: 0.15),
+        borderColor: Colors.grey.withValues(alpha: 0.5),
+        borderStrokeWidth: 2,
+        isFilled: true,
+      ));
+    }
+    
+    return PolygonLayer(polygons: polygons);
+  }
+
+  // ============================================================================
   // DELETE MODE
   // ============================================================================
   
@@ -1249,6 +1393,9 @@ $placemarks  </Document>
     _pingEventSubscription?.cancel();
     _distanceSubscription?.cancel();
     _speedSubscription?.cancel();
+    _newRepeaterSubscription?.cancel();
+    _deadZoneSubscription?.cancel();
+    _batterySaverSubscription?.cancel();
     _heatmapRebuildStream.close();
     _locationService.dispose();
     super.dispose();
@@ -1288,6 +1435,96 @@ $placemarks  </Document>
           children: [
             _buildMap(),
             if (!_hideUIForScreenshot) _buildControlPanel(),
+            if (_showQuickSettings)
+              Positioned(
+                bottom: 80,
+                right: 16,
+                child: Card(
+                  elevation: 8,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Quick Settings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () => setState(() => _showQuickSettings = false),
+                              child: const Icon(Icons.close, size: 18, color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Ping Dist: ', style: TextStyle(fontSize: 12)),
+                            DropdownButton<double>(
+                              value: _pingIntervalMeters,
+                              isDense: true,
+                              items: const [
+                                DropdownMenuItem(value: 200.0, child: Text('200m', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: 400.0, child: Text('400m', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: 805.0, child: Text('0.5mi', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: 1609.0, child: Text('1mi', style: TextStyle(fontSize: 12))),
+                              ],
+                              onChanged: (v) async {
+                                setState(() => _pingIntervalMeters = v!);
+                                _locationService.setPingInterval(v!);
+                                await _settingsService.setPingInterval(v!);
+                              },
+                            ),
+                          ],
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Timeout: ', style: TextStyle(fontSize: 12)),
+                            DropdownButton<int>(
+                              value: _discoveryTimeoutSeconds,
+                              isDense: true,
+                              items: const [
+                                DropdownMenuItem(value: 10, child: Text('10s', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: 15, child: Text('15s', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: 20, child: Text('20s', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: 30, child: Text('30s', style: TextStyle(fontSize: 12))),
+                              ],
+                              onChanged: (v) async {
+                                setState(() => _discoveryTimeoutSeconds = v!);
+                                await _settingsService.setDiscoveryTimeout(v!);
+                              },
+                            ),
+                          ],
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Mode: ', style: TextStyle(fontSize: 12)),
+                            DropdownButton<String>(
+                              value: _pingMode,
+                              isDense: true,
+                              items: const [
+                                DropdownMenuItem(value: 'distance', child: Text('Distance', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: 'time', child: Text('Time', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: 'both', child: Text('Both', style: TextStyle(fontSize: 12))),
+                              ],
+                              onChanged: (v) async {
+                                setState(() => _pingMode = v!);
+                                await _settingsService.setPingMode(v!);
+                                _locationService.setPingMode(v!);
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             if (_deleteMode)
               Positioned(
                 top: 0,
@@ -1339,11 +1576,14 @@ $placemarks  </Document>
             ),
           ),
           const SizedBox(height: 8),
-          FloatingActionButton(
-            heroTag: 'tracking',
-            onPressed: _toggleTracking,
-            backgroundColor: _isTracking ? Colors.red : Colors.green,
-            child: Icon(_isTracking ? Icons.stop : Icons.play_arrow),
+          GestureDetector(
+            onDoubleTap: () => setState(() => _showQuickSettings = !_showQuickSettings),
+            child: FloatingActionButton(
+              heroTag: 'tracking',
+              onPressed: _toggleTracking,
+              backgroundColor: _isTracking ? Colors.red : Colors.green,
+              child: Icon(_isTracking ? Icons.stop : Icons.play_arrow),
+            ),
           ),
         ],
       ),
@@ -1395,6 +1635,7 @@ $placemarks  </Document>
         if (_showRouteTrail) _buildRouteTrailLayer(),
         if (_showHeatmap) _buildHeatmapLayer(),
         if (_showPredictionRings) _buildPredictionRingsLayer(),
+        _buildPrivacyZonesLayer(),
         if (_showCoverage) ..._buildCoverageLayers(),
         if (_showSamples) _buildSampleLayer(),
         if (_showEdges) _buildEdgeLayer(),
@@ -1962,6 +2203,26 @@ $placemarks  </Document>
                           ),
                         ),
                       ),
+                    if (_batterySaverActive)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.orange, width: 1),
+                          ),
+                          child: const Text(
+                            '🔋 Saver',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -2342,24 +2603,25 @@ $placemarks  </Document>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Ignore Mobile Repeater'),
+        title: const Text('Ignore Repeaters'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'Filter out responses from your mobile repeater to avoid false coverage.\n\n'
-              'Enter the first 2-3 characters of your repeater\'s public key:',
+              'Filter out responses from your mobile repeater(s) to avoid false coverage.\n\n'
+              'Enter repeater prefixes separated by commas:',
               style: TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
               decoration: const InputDecoration(
-                labelText: 'Public Key Prefix',
-                hintText: 'e.g., 7E, A4F, etc.',
+                labelText: 'Repeater Prefixes',
+                hintText: 'e.g., 7E, A4F, BAD5',
                 isDense: true,
               ),
               textCapitalization: TextCapitalization.characters,
+              maxLines: 2,
             ),
           ],
         ),
@@ -2821,6 +3083,7 @@ $placemarks  </Document>
                 items: const [
                   DropdownMenuItem(value: 'quality', child: Text('Quality')),
                   DropdownMenuItem(value: 'age', child: Text('Age')),
+                  DropdownMenuItem(value: 'redundancy', child: Text('Redundancy')),
                 ],
                 onChanged: (value) async {
                   setState(() {
@@ -2910,9 +3173,9 @@ $placemarks  </Document>
               ),
             ),
             ListTile(
-              title: const Text('Ignore Mobile Repeater'),
-              subtitle: Text(_ignoredRepeaterPrefix != null 
-                  ? 'Filtering: ${_ignoredRepeaterPrefix}*' 
+              title: const Text('Ignore Repeaters'),
+              subtitle: Text(_ignoredRepeaterPrefix != null && _ignoredRepeaterPrefix!.isNotEmpty
+                  ? 'Ignoring: $_ignoredRepeaterPrefix' 
                   : 'Not filtering'),
               trailing: const Icon(Icons.edit),
               onTap: () {
@@ -3224,6 +3487,21 @@ $placemarks  </Document>
               },
             ),
             ListTile(
+              title: const Text('Achievements'),
+              subtitle: const Text('Wardrive milestone badges'),
+              leading: const Icon(Icons.emoji_events),
+              trailing: const Icon(Icons.arrow_forward),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const AchievementsScreen(),
+                  ),
+                );
+              },
+            ),
+            ListTile(
               title: const Text('Session History'),
               subtitle: Text(_activeSessionFilter != null 
                   ? 'Filtering by session' 
@@ -3406,6 +3684,44 @@ $placemarks  </Document>
                     )
                   : null,
             ),
+            ListTile(
+              title: const Text('Privacy Zones'),
+              subtitle: Text('${_privacyZones.length} zone(s) — excludes data from uploads'),
+              leading: const Icon(Icons.shield, color: Colors.blueGrey),
+              trailing: const Icon(Icons.arrow_forward),
+              onTap: () async {
+                Navigator.pop(context);
+                // Use current position or map center
+                final center = _currentPosition ?? _mapController.camera.center;
+                await _addPrivacyZone(center);
+              },
+            ),
+            if (_privacyZones.isNotEmpty)
+              ListTile(
+                title: const Text('Clear Privacy Zones'),
+                subtitle: Text('Remove all ${_privacyZones.length} zone(s)'),
+                leading: const Icon(Icons.shield_outlined, color: Colors.red),
+                onTap: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Clear Privacy Zones'),
+                      content: const Text('Remove all privacy zones? Data will no longer be filtered from uploads.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Clear', style: TextStyle(color: Colors.red))),
+                      ],
+                    ),
+                  );
+                  if (confirmed == true) {
+                    for (final z in _privacyZones) {
+                      await DatabaseService().deletePrivacyZone(z['id'] as int);
+                    }
+                    await _loadPrivacyZones();
+                    _showSnackBar('Privacy zones cleared');
+                  }
+                },
+              ),
             ListTile(
               title: const Text('Clear Map'),
               subtitle: const Text('Delete all samples and coverage'),

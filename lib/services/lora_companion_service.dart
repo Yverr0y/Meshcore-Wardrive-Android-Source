@@ -97,6 +97,11 @@ class LoRaCompanionService {
   // Settings
   String? _ignoredRepeaterPrefix;
   
+  // Track known repeater IDs for new discovery alerts
+  final Set<String> _knownRepeaterIds = {};
+  final _newRepeaterController = StreamController<String>.broadcast();
+  Stream<String> get newRepeaterStream => _newRepeaterController.stream;
+  
   // Secure storage
   final _secureStorage = const FlutterSecureStorage();
   final _debugLog = DebugLogService();
@@ -112,9 +117,17 @@ class LoRaCompanionService {
   /// Get the currently ignored repeater prefix
   String? get ignoredRepeaterPrefix => _ignoredRepeaterPrefix;
   
-  /// Set repeater prefix to ignore (e.g., your mobile repeater)
+  /// Set repeater prefixes to ignore (comma-separated, e.g. "7E,A4F,BAD5")
   void setIgnoredRepeaterPrefix(String? prefix) {
     _ignoredRepeaterPrefix = prefix;
+  }
+  
+  /// Check if a node ID matches any ignored prefix
+  bool _isIgnoredRepeater(String nodeId) {
+    if (_ignoredRepeaterPrefix == null || _ignoredRepeaterPrefix!.isEmpty) return false;
+    final prefixes = _ignoredRepeaterPrefix!.split(',').map((s) => s.trim().toUpperCase()).where((s) => s.isNotEmpty);
+    final upper = nodeId.toUpperCase();
+    return prefixes.any((prefix) => upper.startsWith(prefix));
   }
   
   /// Check if a node ID is a companion device (not a repeater)
@@ -910,8 +923,7 @@ class LoRaCompanionService {
       print('🔍 Discovery response from $pubkeyShort (SNR=$snr, RSSI=$rssi)');
       
       // Check if this repeater should be ignored (mobile companion)
-      final shouldIgnore = _ignoredRepeaterPrefix != null && 
-          pubkeyShort.toUpperCase().startsWith(_ignoredRepeaterPrefix!.toUpperCase());
+      final shouldIgnore = _isIgnoredRepeater(pubkeyShort);
       
       // Always request contact details so the pubkey gets cached (needed for Carpeater login)
       if (!_knownRepeaters.containsKey(pubkey) && discovery['pubkey_bytes'] != null) {
@@ -923,6 +935,13 @@ class LoRaCompanionService {
       if (shouldIgnore) {
         _debugLog.logInfo('⛔ Ignoring discovery response from mobile repeater: $pubkeyShort');
         return;
+      }
+      
+      // Check if this is a NEW repeater we've never seen
+      if (!_knownRepeaterIds.contains(pubkeyShort)) {
+        _knownRepeaterIds.add(pubkeyShort);
+        _newRepeaterController.add(pubkeyShort);
+        _debugLog.logInfo('🆕 NEW repeater discovered: $pubkeyShort');
       }
       
       // Check if this response matches a pending ping
@@ -973,10 +992,7 @@ class LoRaCompanionService {
     }
     
     // Check if this repeater should be ignored (mobile companion)
-    final shouldIgnore = _ignoredRepeaterPrefix != null && 
-        contact.publicKeyPrefix.toUpperCase().startsWith(_ignoredRepeaterPrefix!.toUpperCase());
-    
-    if (shouldIgnore) {
+    if (_isIgnoredRepeater(contact.publicKeyPrefix)) {
       _debugLog.logInfo('⛔ Ignoring mobile repeater: ${contact.advName ?? contact.publicKeyPrefix}');
       return;
     }
@@ -1049,10 +1065,7 @@ class LoRaCompanionService {
       print('✅ ACK from repeater $keyPrefix (SNR=$snr, RSSI=$rssi)');
       
       // Check if this repeater should be ignored (mobile companion)
-      final shouldIgnore = _ignoredRepeaterPrefix != null && 
-          keyPrefix.toUpperCase().startsWith(_ignoredRepeaterPrefix!.toUpperCase());
-      
-      if (shouldIgnore) {
+      if (_isIgnoredRepeater(keyPrefix)) {
         _debugLog.logInfo('⛔ Ignoring ACK from mobile repeater: $keyPrefix');
         return;
       }

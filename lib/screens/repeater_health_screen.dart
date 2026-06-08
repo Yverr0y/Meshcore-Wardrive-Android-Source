@@ -56,18 +56,30 @@ class _RepeaterHealthScreenState extends State<RepeaterHealthScreen> {
     }
     
     final degradingCount = stats.where((s) => s.isDegrading).length;
+    final offlineCount = stats.where((s) => s.isOffline).length;
     
     return Scaffold(
       appBar: AppBar(
         title: const Text('Repeater Health'),
         actions: [
+          if (offlineCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Chip(
+                avatar: const Icon(Icons.cloud_off, size: 14, color: Colors.red),
+                label: Text('$offlineCount offline', style: const TextStyle(fontSize: 11)),
+                backgroundColor: Colors.red.withValues(alpha: 0.15),
+                padding: EdgeInsets.zero,
+              ),
+            ),
           if (degradingCount > 0)
             Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Chip(
-                avatar: const Icon(Icons.warning, size: 16, color: Colors.orange),
-                label: Text('$degradingCount degrading'),
+                avatar: const Icon(Icons.warning, size: 14, color: Colors.orange),
+                label: Text('$degradingCount degrading', style: const TextStyle(fontSize: 11)),
                 backgroundColor: Colors.orange.withValues(alpha: 0.15),
+                padding: EdgeInsets.zero,
               ),
             ),
         ],
@@ -185,6 +197,10 @@ class _RepeaterHealthScreenState extends State<RepeaterHealthScreen> {
       cells.add(s.geohash.substring(0, min(6, s.geohash.length)));
     }
     
+    // Offline detection: not seen in 7 days with 10+ pings total
+    final daysSinceSeen = now.difference(samples.last.timestamp).inDays;
+    final isOffline = daysSinceSeen >= 7 && totalPings >= 10;
+    
     return _RepeaterStats(
       id: id,
       totalPings: totalPings,
@@ -193,6 +209,8 @@ class _RepeaterHealthScreenState extends State<RepeaterHealthScreen> {
       avgResponseMs: avgResponse,
       trend: trend,
       isDegrading: isDegrading,
+      isOffline: isOffline,
+      daysSinceSeen: daysSinceSeen,
       rate7day: rate7,
       rate30day: rate30,
       firstSeen: samples.first.timestamp,
@@ -239,7 +257,10 @@ class _RepeaterCard extends StatelessWidget {
                   Icon(Icons.cell_tower, size: 18, color: rateColor),
                   const SizedBox(width: 8),
                   Text(displayId, style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold)),
-                  if (stats.isDegrading) ...[
+                  if (stats.isOffline) ...[
+                    const SizedBox(width: 8),
+                    const Icon(Icons.cloud_off, size: 16, color: Colors.red),
+                  ] else if (stats.isDegrading) ...[
                     const SizedBox(width: 8),
                     const Icon(Icons.warning, size: 16, color: Colors.orange),
                   ],
@@ -263,8 +284,9 @@ class _RepeaterCard extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                'First: ${DateFormat('MMM d').format(stats.firstSeen)} • Last: ${DateFormat('MMM d').format(stats.lastSeen)}',
-                style: const TextStyle(fontSize: 10, color: Colors.grey),
+                'First: ${DateFormat('MMM d').format(stats.firstSeen)} • Last: ${DateFormat('MMM d').format(stats.lastSeen)}'
+                '${stats.isOffline ? ' • ⚠️ Offline ${stats.daysSinceSeen}d' : ''}',
+                style: TextStyle(fontSize: 10, color: stats.isOffline ? Colors.red : Colors.grey),
               ),
             ],
           ),
@@ -647,6 +669,8 @@ class _RepeaterStats {
   final double? avgResponseMs;
   final String trend;
   final bool isDegrading;
+  final bool isOffline;
+  final int daysSinceSeen;
   final double? rate7day;
   final double? rate30day;
   final DateTime firstSeen;
@@ -661,6 +685,8 @@ class _RepeaterStats {
     this.avgResponseMs,
     required this.trend,
     required this.isDegrading,
+    this.isOffline = false,
+    this.daysSinceSeen = 0,
     this.rate7day,
     this.rate30day,
     required this.firstSeen,

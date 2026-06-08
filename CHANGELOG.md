@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.0.39 - 2026-06-08
+
+### Added
+- **Multiple Ignore Repeaters**: Comma-separated list support for ignoring multiple repeater prefixes at once
+- **Live Notification Stats**: Foreground notification now shows real-time success rate, ping count, and distance (e.g., `✅ 85% | 📍 247 pings | 🛣️ 12.3mi`)
+- **Repeater Contacts in JSON Export**: Discovered repeaters now included in unified JSON exports
+- **Privacy Zones**: Define circular exclusion areas on the map — data inside zones is stripped from uploads and exports. Long-press to add, manage via Settings menu
+- **New Repeater Discovery Alert**: Sound + snackbar notification when a never-before-seen repeater is discovered during wardriving
+- **Dead Zone Alerts**: Vibration + snackbar warning when entering a previously-mapped dead zone (throttled to once per cell per session)
+- **Battery Saver Mode**: Automatically doubles ping interval when device battery ≤20%, restores at >30%. Shows orange "🔋 Saver" badge in control panel
+- **Coverage Redundancy View**: New "Redundancy" color mode showing repeater count per cell (green=3+, yellow=2, orange=1)
+- **Coverage Score**: New Score tab in Analytics — single shareable number computed from `uniqueCells × successRate × freshness` with letter grade (S/A/B/C/D)
+- **Wardrive Achievements**: 14 milestone badges (First Ping, Kilopinger, Road Warrior, Mesh Master, etc.) with unlock notifications and dedicated Achievements screen
+- **Repeater Downtime Detection**: Repeater Health screen now flags repeaters not seen in 7+ days (with 10+ total pings) with offline icon and day count
+- **Quick Settings Gesture**: Double-tap the tracking FAB to show a floating overlay with ping distance, timeout, and mode dropdowns for quick adjustments
+
+### Technical
+- Database version 10 → 11: new `privacy_zones` table
+- New `achievement_service.dart` with SharedPreferences-based badge tracking
+- New `achievements_screen.dart` with progress bar and unlock history
+- Added `battery_plus` dependency for device battery monitoring
+- `DatabaseService`: added `isDeadZoneCell()`, privacy zone CRUD, export with repeaters
+- `LocationService`: dead zone stream, battery saver stream, battery monitoring lifecycle
+- `AggregationService`: new `redundancy` color mode branch
+- Analytics: new Coverage Score tab with share button, 5-tab bottom nav
+- Repeater Health: `isOffline`/`daysSinceSeen` fields, offline badge in app bar
+
 ## v1.0.38 - 2026-04-28
 
 ### Added

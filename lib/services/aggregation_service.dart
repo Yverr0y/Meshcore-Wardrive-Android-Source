@@ -188,6 +188,13 @@ class AggregationService {
       if (age < 30) return gradientColors[1].value; // Medium
       if (age < 90) return Color.lerp(gradientColors[1], gradientColors[2], 0.5)!.value;
       return gradientColors[2].value; // Old
+    } else if (colorMode == 'redundancy') {
+      // Color by number of unique repeaters that cover this cell
+      final count = coverage.repeaters.length;
+      if (count >= 3) return 0xFF4CAF50; // Green  — 3+ repeaters
+      if (count == 2) return 0xFFFFEB3B; // Yellow — 2 repeaters
+      if (count == 1) return 0xFFFF9800; // Orange — 1 repeater
+      return 0xFF9E9E9E;                // Gray   — 0 repeaters (all failed)
     } else {
       // Default: coverage based on ping success rate
       final received = coverage.received; // Successful pings

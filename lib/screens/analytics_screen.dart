@@ -4,10 +4,12 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geohash_plus/geohash_plus.dart' as geohash;
+import 'package:share_plus/share_plus.dart';
 import '../models/models.dart';
 import '../services/aggregation_service.dart';
 import '../services/database_service.dart';
 import '../services/settings_service.dart';
+import '../utils/geohash_utils.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   final List<Sample> samples;
@@ -37,6 +39,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       body: IndexedStack(
         index: _tabIndex,
         children: [
+          _CoverageScoreTab(
+            samples: widget.samples,
+            coveragePrecision: widget.coveragePrecision,
+          ),
           _TimeOfDayTab(samples: widget.samples),
           _CoverageGoalTab(
             samples: widget.samples,
@@ -54,12 +60,172 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         selectedFontSize: 12,
         unselectedFontSize: 11,
         items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.star), label: 'Score'),
           BottomNavigationBarItem(icon: Icon(Icons.schedule), label: 'Time'),
           BottomNavigationBarItem(icon: Icon(Icons.flag), label: 'Goals'),
           BottomNavigationBarItem(icon: Icon(Icons.compare_arrows), label: 'Compare'),
           BottomNavigationBarItem(icon: Icon(Icons.cell_tower), label: 'Repeaters'),
         ],
       ),
+    );
+  }
+}
+
+// =============================================================================
+// TAB 0: Coverage Score
+// =============================================================================
+
+class _CoverageScoreTab extends StatelessWidget {
+  final List<Sample> samples;
+  final int coveragePrecision;
+  const _CoverageScoreTab({required this.samples, required this.coveragePrecision});
+
+  @override
+  Widget build(BuildContext context) {
+    final pingSamples = samples.where((s) => s.pingSuccess != null).toList();
+    if (pingSamples.isEmpty) {
+      return const Center(
+        child: Text('No ping data yet.\nDo some wardriving first!', textAlign: TextAlign.center),
+      );
+    }
+
+    // Group by coverage cell
+    final Map<String, List<Sample>> cells = {};
+    for (final s in pingSamples) {
+      final key = GeohashUtils.coverageKey(
+        s.position.latitude, s.position.longitude, precision: coveragePrecision,
+      );
+      cells.putIfAbsent(key, () => []).add(s);
+    }
+
+    final uniqueCells = cells.length;
+    final totalPings = pingSamples.length;
+    final successes = pingSamples.where((s) => s.pingSuccess == true).length;
+    final avgSuccessRate = totalPings > 0 ? successes / totalPings : 0.0;
+
+    // Freshness factor: weighted average age of samples
+    // Recent data is worth more
+    double freshness = 0.0;
+    for (final s in pingSamples) {
+      final age = GeohashUtils.ageInDays(s.timestamp);
+      if (age <= 1) {
+        freshness += 1.0;
+      } else if (age <= 7) {
+        freshness += 0.8;
+      } else if (age <= 30) {
+        freshness += 0.5;
+      } else {
+        freshness += 0.2;
+      }
+    }
+    freshness = totalPings > 0 ? freshness / totalPings : 0.0;
+
+    // Score = uniqueCells × avgSuccessRate × freshness
+    final score = (uniqueCells * avgSuccessRate * freshness).round();
+
+    // Unique repeaters
+    final repeaterIds = <String>{};
+    for (final s in pingSamples) {
+      if (s.path != null && s.path!.isNotEmpty) repeaterIds.add(s.path!);
+    }
+
+    // Grade
+    String grade;
+    Color gradeColor;
+    if (score >= 500) {
+      grade = 'S';
+      gradeColor = Colors.purple;
+    } else if (score >= 200) {
+      grade = 'A';
+      gradeColor = Colors.green;
+    } else if (score >= 100) {
+      grade = 'B';
+      gradeColor = Colors.lightGreen;
+    } else if (score >= 50) {
+      grade = 'C';
+      gradeColor = Colors.orange;
+    } else {
+      grade = 'D';
+      gradeColor = Colors.red;
+    }
+
+    final shareText = 'MeshCore Wardrive Score: $score ($grade)\n'
+        'Cells: $uniqueCells • Success: ${(avgSuccessRate * 100).toStringAsFixed(0)}% • '
+        'Freshness: ${(freshness * 100).toStringAsFixed(0)}%\n'
+        'Repeaters: ${repeaterIds.length} • Pings: $totalPings';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Big score display
+          Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Text(grade,
+                      style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: gradeColor)),
+                  Text('$score',
+                      style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  const Text('Coverage Score',
+                      style: TextStyle(fontSize: 14, color: Colors.grey)),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _scoreStat('Cells', '$uniqueCells'),
+                      _scoreStat('Success', '${(avgSuccessRate * 100).toStringAsFixed(0)}%'),
+                      _scoreStat('Fresh', '${(freshness * 100).toStringAsFixed(0)}%'),
+                      _scoreStat('Repeaters', '${repeaterIds.length}'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Formula explanation
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('How it\'s calculated',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  const Text('Score = Unique Cells × Success Rate × Freshness',
+                      style: TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                  const SizedBox(height: 8),
+                  Text('• $uniqueCells cells × ${avgSuccessRate.toStringAsFixed(2)} × ${freshness.toStringAsFixed(2)} = $score',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 4),
+                  const Text('• Freshness: <1d=100%, <7d=80%, <30d=50%, older=20%',
+                      style: TextStyle(fontSize: 11, color: Colors.grey)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () => Share.share(shareText),
+            icon: const Icon(Icons.share, size: 18),
+            label: const Text('Share Score'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _scoreStat(String label, String value) {
+    return Column(
+      children: [
+        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+      ],
     );
   }
 }

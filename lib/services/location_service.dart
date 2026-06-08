@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math';
+import 'package:battery_plus/battery_plus.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geolocator_android/geolocator_android.dart';
 import 'package:latlong2/latlong.dart';
@@ -53,6 +54,10 @@ class LocationService {
   double _totalDistanceMeters = 0.0;
   LatLng? _lastPosition;
   
+  // Session ping stats for live notification
+  int _sessionPingCount = 0;
+  int _sessionSuccessCount = 0;
+  
   // Session tracking
   int? _currentSessionId;
   DateTime? _sessionStartTime;
@@ -80,6 +85,20 @@ class LocationService {
   double get currentSpeedMph => _currentSpeedMps * 2.23694;
   double get currentSpeedKmh => _currentSpeedMps * 3.6;
   
+  // Dead zone alerts — throttle to once per cell per session
+  final Set<String> _deadZoneAlertedCells = {};
+  final _deadZoneController = StreamController<String>.broadcast();
+  Stream<String> get deadZoneStream => _deadZoneController.stream;
+  
+  // Battery saver mode
+  final Battery _battery = Battery();
+  StreamSubscription<BatteryState>? _batteryStateSubscription;
+  bool _batterySaverActive = false;
+  double _normalPingInterval = 805.0; // Saved before battery saver doubles it
+  final _batterySaverController = StreamController<bool>.broadcast();
+  Stream<bool> get batterySaverStream => _batterySaverController.stream;
+  bool get isBatterySaverActive => _batterySaverActive;
+  
   // Ducting monitoring
   bool _ductingEnabled = false;
   Timer? _ductingFetchTimer;
@@ -93,6 +112,23 @@ class LocationService {
   
   /// Get ducting service for UI access
   DuctingService get ductingService => _ductingService;
+  
+  /// Get session ping stats
+  int get sessionPingCount => _sessionPingCount;
+  int get sessionSuccessCount => _sessionSuccessCount;
+  
+  /// Update foreground notification with live wardrive stats
+  void _updateLiveNotification() {
+    if (!_isTracking) return;
+    final rate = _sessionPingCount > 0
+        ? ((_sessionSuccessCount / _sessionPingCount) * 100).toStringAsFixed(0)
+        : '--';
+    final dist = (_totalDistanceMeters / 1609.34).toStringAsFixed(1);
+    FlutterForegroundTask.updateService(
+      notificationTitle: 'MeshCore Wardrive',
+      notificationText: '✅ $rate% | 📍 $_sessionPingCount pings | 🛣️ ${dist}mi',
+    );
+  }
   
   /// Get carpeater service for UI access
   CarpeaterService get carpeaterService => _carpeaterService;
@@ -295,7 +331,13 @@ class LocationService {
       print('Wakelock enabled - app will stay active during tracking');
 
       _isTracking = true;
+      _sessionPingCount = 0;
+      _sessionSuccessCount = 0;
+      _deadZoneAlertedCells.clear();
       WidgetService.updateTrackingStatus(true);
+      
+      // Start monitoring device battery for battery saver mode
+      _startBatteryMonitoring();
       
       // Reset distance tracking for new session
       _totalDistanceMeters = 0.0;
@@ -494,6 +536,9 @@ class LocationService {
       print('Location outside valid range: $latLng');
       return;
     }
+    
+    // Dead zone alert: check if current coverage cell is a known dead zone
+    _checkDeadZone(latLng);
 
     // Create sample
     final geohash = GeohashUtils.sampleKey(
@@ -587,6 +632,65 @@ class LocationService {
     }
   }
   
+  /// Start monitoring device battery level for battery saver mode
+  void _startBatteryMonitoring() {
+    _batteryStateSubscription?.cancel();
+    _batteryStateSubscription = _battery.onBatteryStateChanged.listen((_) async {
+      try {
+        final level = await _battery.batteryLevel;
+        if (level <= 20 && !_batterySaverActive) {
+          _activateBatterySaver();
+        } else if (level > 30 && _batterySaverActive) {
+          _deactivateBatterySaver();
+        }
+      } catch (e) {
+        // Battery API not available — ignore
+      }
+    });
+    // Also check immediately
+    _battery.batteryLevel.then((level) {
+      if (level <= 20 && !_batterySaverActive) {
+        _activateBatterySaver();
+      }
+    }).catchError((_) {});
+  }
+  
+  void _activateBatterySaver() {
+    _batterySaverActive = true;
+    _normalPingInterval = _pingIntervalMeters;
+    _pingIntervalMeters = _normalPingInterval * 2;
+    _batterySaverController.add(true);
+    _logger.logPowerEvent('Battery saver ON — ping interval doubled to ${_pingIntervalMeters.toStringAsFixed(0)}m');
+  }
+  
+  void _deactivateBatterySaver() {
+    _batterySaverActive = false;
+    _pingIntervalMeters = _normalPingInterval;
+    _batterySaverController.add(false);
+    _logger.logPowerEvent('Battery saver OFF — ping interval restored to ${_pingIntervalMeters.toStringAsFixed(0)}m');
+  }
+  
+  /// Check if the current position is in a known dead zone and alert once per cell
+  void _checkDeadZone(LatLng latLng) async {
+    try {
+      final precision = await _settings.getCoveragePrecision();
+      final cellHash = GeohashUtils.coverageKey(
+        latLng.latitude, latLng.longitude, precision: precision,
+      );
+      if (_deadZoneAlertedCells.contains(cellHash)) return;
+      
+      final isDead = await _dbService.isDeadZoneCell(cellHash);
+      if (isDead) {
+        _deadZoneAlertedCells.add(cellHash);
+        _deadZoneController.add(cellHash);
+        _soundService.playPingFailed();
+        await _logger.logPingEvent('Dead zone alert: cell $cellHash');
+      }
+    } catch (e) {
+      // Non-critical — don't break GPS tracking
+    }
+  }
+  
   /// Perform ping in background and update sample when complete
   void _performPingInBackground(LatLng latLng, String geohash) async {
     try {
@@ -622,15 +726,16 @@ class LocationService {
         notificationText: resultText,
       );
       
+      // Update session stats
+      _sessionPingCount++;
+      if (pingSuccess) _sessionSuccessCount++;
+      
       // Notify UI
       _pingEventController.add(pingSuccess ? 'success' : 'failed');
       
-      // Reset notification after 3 seconds
+      // Update notification with live stats
       Future.delayed(const Duration(seconds: 3), () {
-        FlutterForegroundTask.updateService(
-          notificationTitle: 'MeshCore Wardrive',
-          notificationText: 'Location tracking active',
-        );
+        _updateLiveNotification();
       });
       
       // Tag with ducting risk if monitoring is enabled
@@ -695,6 +800,13 @@ class LocationService {
     // Stop time-based ping timer
     _timePingTimer?.cancel();
     _timePingTimer = null;
+    
+    // Stop battery monitoring and deactivate battery saver
+    _batteryStateSubscription?.cancel();
+    _batteryStateSubscription = null;
+    if (_batterySaverActive) {
+      _deactivateBatterySaver();
+    }
     
     // Stop Carpeater mode
     _carpeaterNeighboursSubscription?.cancel();
@@ -812,14 +924,15 @@ class LocationService {
       return !nId.startsWith(targetId);
     }).toList();
     
-    // Also filter ignored repeater prefix if set
-    final ignoredPrefix = _loraCompanion.ignoredRepeaterPrefix;
-    final results = ignoredPrefix != null && ignoredPrefix.isNotEmpty
+    // Also filter ignored repeater prefixes if set (comma-separated)
+    final ignoredPrefixStr = _loraCompanion.ignoredRepeaterPrefix;
+    final results = ignoredPrefixStr != null && ignoredPrefixStr.isNotEmpty
         ? filtered.where((n) {
             final pubkey = n['pubkey'] as String?;
             if (pubkey == null) return true;
             final nId = pubkey.length >= 8 ? pubkey.substring(0, 8).toUpperCase() : pubkey.toUpperCase();
-            return !nId.startsWith(ignoredPrefix.toUpperCase());
+            final prefixes = ignoredPrefixStr.split(',').map((s) => s.trim().toUpperCase()).where((s) => s.isNotEmpty);
+            return !prefixes.any((prefix) => nId.startsWith(prefix));
           }).toList()
         : filtered;
     
@@ -899,6 +1012,9 @@ class LocationService {
     _pingEventController.close();
     _totalDistanceController.close();
     _speedController.close();
+    _deadZoneController.close();
+    _batterySaverController.close();
+    _batteryStateSubscription?.cancel();
     _carpeaterNeighboursSubscription?.cancel();
     _carpeaterDiscoveryStartedSubscription?.cancel();
     _carpeaterService.dispose();

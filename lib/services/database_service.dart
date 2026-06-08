@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,13 +8,14 @@ import 'dart:io';
 class DatabaseService {
   static Database? _database;
   static const String _databaseName = 'meshcore_wardrive.db';
-  static const int _databaseVersion = 10;
+  static const int _databaseVersion = 11;
   static const String tableDuctingCache = 'ducting_cache';
 
   static const String tableSamples = 'samples';
   static const String tableUploads = 'uploads';
   static const String tableSessions = 'sessions';
   static const String tableMarkers = 'planned_markers';
+  static const String tablePrivacyZones = 'privacy_zones';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -120,6 +122,17 @@ class DatabaseService {
         created_at INTEGER NOT NULL
       )
     ''');
+    
+    // Create privacy zones table
+    await db.execute('''
+      CREATE TABLE $tablePrivacyZones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL,
+        radius_meters REAL NOT NULL,
+        label TEXT
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -207,6 +220,17 @@ class DatabaseService {
           lon REAL NOT NULL,
           label TEXT,
           created_at INTEGER NOT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 11) {
+      await db.execute('''
+        CREATE TABLE $tablePrivacyZones (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lat REAL NOT NULL,
+          lon REAL NOT NULL,
+          radius_meters REAL NOT NULL,
+          label TEXT
         )
       ''');
     }
@@ -385,16 +409,21 @@ class DatabaseService {
     return samples.map((s) => s.toJson()).toList();
   }
   
-  /// Export all data (samples + sessions) as a unified JSON map
-  Future<Map<String, dynamic>> exportAllData() async {
+  /// Export all data (samples + sessions + repeaters) as a unified JSON map
+  /// Pass discoveredRepeaters from the LoRa service to include them.
+  Future<Map<String, dynamic>> exportAllData({List<Map<String, dynamic>>? repeaters}) async {
     final samples = await getAllSamples();
     final sessions = await getAllSessions();
-    return {
+    final data = <String, dynamic>{
       '_format': 'meshcore_wardrive_data',
-      '_version': 1,
+      '_version': 2,
       'samples': samples.map((s) => s.toJson()).toList(),
       'sessions': sessions.map((s) => s.toJson()).toList(),
     };
+    if (repeaters != null && repeaters.isNotEmpty) {
+      data['repeaters'] = repeaters;
+    }
+    return data;
   }
   
   /// Import data from unified format (samples + sessions).
@@ -561,6 +590,27 @@ class DatabaseService {
     return maps.map((map) => Sample.fromMap(map)).toList();
   }
 
+  /// Check if a coverage cell (geohash prefix) is a known dead zone.
+  /// Returns true if there are ping samples AND all of them failed.
+  Future<bool> isDeadZoneCell(String geohashPrefix) async {
+    final db = await database;
+    // Count pings (pingSuccess IS NOT NULL) in this cell
+    final totalResult = await db.rawQuery(
+      'SELECT COUNT(*) FROM $tableSamples WHERE geohash LIKE ? AND pingSuccess IS NOT NULL',
+      ['$geohashPrefix%'],
+    );
+    final total = Sqflite.firstIntValue(totalResult) ?? 0;
+    if (total == 0) return false; // No ping data = not a dead zone
+    
+    // Count successful pings
+    final successResult = await db.rawQuery(
+      'SELECT COUNT(*) FROM $tableSamples WHERE geohash LIKE ? AND pingSuccess = 1',
+      ['$geohashPrefix%'],
+    );
+    final successes = Sqflite.firstIntValue(successResult) ?? 0;
+    return successes == 0; // Dead zone = all pings failed
+  }
+
   // ============================================================================
   // PLANNED MARKERS
   // ============================================================================
@@ -613,6 +663,62 @@ class DatabaseService {
       where: 'geohash LIKE ?',
       whereArgs: ['$geohashPrefix%'],
     );
+  }
+
+  // ============================================================================
+  // PRIVACY ZONES
+  // ============================================================================
+  
+  /// Add a privacy zone (circular exclusion area)
+  Future<int> addPrivacyZone(double lat, double lon, double radiusMeters, String? label) async {
+    final db = await database;
+    return await db.insert(tablePrivacyZones, {
+      'lat': lat,
+      'lon': lon,
+      'radius_meters': radiusMeters,
+      'label': label,
+    });
+  }
+  
+  /// Get all privacy zones
+  Future<List<Map<String, dynamic>>> getAllPrivacyZones() async {
+    final db = await database;
+    return await db.query(tablePrivacyZones);
+  }
+  
+  /// Delete a privacy zone by ID
+  Future<void> deletePrivacyZone(int id) async {
+    final db = await database;
+    await db.delete(tablePrivacyZones, where: 'id = ?', whereArgs: [id]);
+  }
+  
+  /// Check if a lat/lon point falls inside any privacy zone
+  /// Uses haversine approximation (good enough for small radii)
+  Future<bool> isInPrivacyZone(double lat, double lon) async {
+    final zones = await getAllPrivacyZones();
+    for (final zone in zones) {
+      final dlat = (lat - (zone['lat'] as double)) * 111320; // meters per degree lat
+      final dlon = (lon - (zone['lon'] as double)) * 111320 * cos(lat * 3.14159 / 180);
+      final dist = sqrt(dlat * dlat + dlon * dlon);
+      if (dist <= (zone['radius_meters'] as double)) return true;
+    }
+    return false;
+  }
+  
+  /// Filter a list of samples, removing those inside privacy zones
+  Future<List<Sample>> filterByPrivacyZones(List<Sample> samples) async {
+    final zones = await getAllPrivacyZones();
+    if (zones.isEmpty) return samples;
+    
+    return samples.where((s) {
+      for (final zone in zones) {
+        final dlat = (s.position.latitude - (zone['lat'] as double)) * 111320;
+        final dlon = (s.position.longitude - (zone['lon'] as double)) * 111320 * cos(s.position.latitude * 3.14159 / 180);
+        final dist = sqrt(dlat * dlat + dlon * dlon);
+        if (dist <= (zone['radius_meters'] as double)) return false;
+      }
+      return true;
+    }).toList();
   }
 
   /// Close the database

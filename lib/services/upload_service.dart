@@ -101,7 +101,11 @@ class UploadService {
       
       // Only upload actual ping samples — GPS-only (pingSuccess=null) samples
       // would be counted as failures by the web map
-      final samples = allSamples.where((s) => s.pingSuccess != null).toList();
+      var filteredSamples = allSamples.where((s) => s.pingSuccess != null).toList();
+      
+      // Filter out samples inside privacy zones
+      filteredSamples = await _db.filterByPrivacyZones(filteredSamples);
+      final samples = filteredSamples;
       
       if (samples.isEmpty) {
         return UploadResult(success: true, message: 'No new samples to upload');
