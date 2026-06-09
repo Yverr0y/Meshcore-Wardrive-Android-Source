@@ -69,6 +69,10 @@ class LoRaCompanionService {
   final _batteryController = StreamController<int?>.broadcast();
   StreamSubscription? _connectionStateSubscription;
   
+  // Connected device identity for sample tagging
+  String? _connectedDeviceId; // Stable ID for the connected LoRa companion
+  String? get connectedDeviceId => _connectedDeviceId;
+  
   
   // Track pending contact requests
   final Set<String> _pendingContactRequests = {};
@@ -97,10 +101,22 @@ class LoRaCompanionService {
   // Settings
   String? _ignoredRepeaterPrefix;
   
-  // Track known repeater IDs for new discovery alerts
+  // Track known repeater IDs for new discovery alerts (populated from DB on connect)
   final Set<String> _knownRepeaterIds = {};
   final _newRepeaterController = StreamController<String>.broadcast();
   Stream<String> get newRepeaterStream => _newRepeaterController.stream;
+  bool _newRepeaterAlertsEnabled = true;
+  
+  /// Load known repeater IDs from the database so only truly new ones trigger alerts
+  Future<void> loadKnownRepeaterIds(Set<String> ids) async {
+    _knownRepeaterIds.addAll(ids);
+    _debugLog.logInfo('Loaded ${ids.length} known repeater IDs from DB');
+  }
+  
+  /// Set whether new repeater alerts are enabled
+  void setNewRepeaterAlertsEnabled(bool enabled) {
+    _newRepeaterAlertsEnabled = enabled;
+  }
   
   // Secure storage
   final _secureStorage = const FlutterSecureStorage();
@@ -259,7 +275,8 @@ class LoRaCompanionService {
         _deviceName = device.platformName.isNotEmpty 
             ? device.platformName 
             : device.remoteId.toString();
-        print('Connected to LoRa device via Bluetooth');
+        _connectedDeviceId = device.remoteId.toString().replaceAll(':', '').toUpperCase();
+        print('Connected to LoRa device via Bluetooth (ID: $_connectedDeviceId)');
         
         // Monitor connection state for disconnection
         _connectionStateSubscription = device.connectionState.listen((state) {
@@ -343,7 +360,10 @@ class LoRaCompanionService {
       );
 
       _connectionType = ConnectionType.usb;
-      print('Connected to LoRa device via USB');
+      // Use USB device product name + vendor ID as stable identifier
+      _connectedDeviceId = 'USB_${device.productName ?? 'unknown'}'.replaceAll(' ', '_').toUpperCase();
+      _deviceName = device.productName ?? 'USB Device';
+      print('Connected to LoRa device via USB (ID: $_connectedDeviceId)');
       
       // Ensure USB mode in protocol parser (wrapped frames with '>')
       _protocol.setBLEMode(false);
@@ -937,11 +957,13 @@ class LoRaCompanionService {
         return;
       }
       
-      // Check if this is a NEW repeater we've never seen
+      // Check if this is a NEW repeater we've never seen (in DB history)
       if (!_knownRepeaterIds.contains(pubkeyShort)) {
         _knownRepeaterIds.add(pubkeyShort);
-        _newRepeaterController.add(pubkeyShort);
-        _debugLog.logInfo('🆕 NEW repeater discovered: $pubkeyShort');
+        if (_newRepeaterAlertsEnabled) {
+          _newRepeaterController.add(pubkeyShort);
+          _debugLog.logInfo('🆕 NEW repeater discovered: $pubkeyShort');
+        }
       }
       
       // Check if this response matches a pending ping

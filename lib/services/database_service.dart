@@ -8,7 +8,7 @@ import 'dart:io';
 class DatabaseService {
   static Database? _database;
   static const String _databaseName = 'meshcore_wardrive.db';
-  static const int _databaseVersion = 11;
+  static const int _databaseVersion = 12;
   static const String tableDuctingCache = 'ducting_cache';
 
   static const String tableSamples = 'samples';
@@ -16,6 +16,7 @@ class DatabaseService {
   static const String tableSessions = 'sessions';
   static const String tableMarkers = 'planned_markers';
   static const String tablePrivacyZones = 'privacy_zones';
+  static const String tableDevices = 'devices';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -231,6 +232,19 @@ class DatabaseService {
           lon REAL NOT NULL,
           radius_meters REAL NOT NULL,
           label TEXT
+        )
+      ''');
+    }
+    if (oldVersion < 12) {
+      await db.execute('ALTER TABLE $tableSamples ADD COLUMN device_id TEXT');
+      await db.execute('''
+        CREATE TABLE $tableDevices (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          public_key TEXT UNIQUE NOT NULL,
+          name TEXT,
+          connection_type TEXT,
+          first_used INTEGER NOT NULL,
+          last_used INTEGER NOT NULL
         )
       ''');
     }
@@ -590,6 +604,15 @@ class DatabaseService {
     return maps.map((map) => Sample.fromMap(map)).toList();
   }
 
+  /// Get all distinct repeater IDs (node_id / path) that have ever responded to a ping
+  Future<Set<String>> getDistinctRepeaterIds() async {
+    final db = await database;
+    final results = await db.rawQuery(
+      'SELECT DISTINCT path FROM $tableSamples WHERE path IS NOT NULL AND path != \'\'',
+    );
+    return results.map((r) => (r['path'] as String).toUpperCase()).toSet();
+  }
+
   /// Check if a coverage cell (geohash prefix) is a known dead zone.
   /// Returns true if there are ping samples AND all of them failed.
   Future<bool> isDeadZoneCell(String geohashPrefix) async {
@@ -609,6 +632,80 @@ class DatabaseService {
     );
     final successes = Sqflite.firstIntValue(successResult) ?? 0;
     return successes == 0; // Dead zone = all pings failed
+  }
+
+  // ============================================================================
+  // DEVICES
+  // ============================================================================
+  
+  /// Add or update a paired device
+  Future<void> upsertDevice(String publicKey, String name, String connectionType) async {
+    final db = await database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final existing = await db.query(tableDevices, where: 'public_key = ?', whereArgs: [publicKey], limit: 1);
+    if (existing.isEmpty) {
+      await db.insert(tableDevices, {
+        'public_key': publicKey,
+        'name': name,
+        'connection_type': connectionType,
+        'first_used': now,
+        'last_used': now,
+      });
+    } else {
+      await db.update(tableDevices, {
+        'name': name,
+        'connection_type': connectionType,
+        'last_used': now,
+      }, where: 'public_key = ?', whereArgs: [publicKey]);
+    }
+  }
+  
+  /// Get all paired devices
+  Future<List<Map<String, dynamic>>> getAllDevices() async {
+    final db = await database;
+    return await db.query(tableDevices, orderBy: 'last_used DESC');
+  }
+  
+  /// Get per-device stats from samples tagged with device_id
+  Future<Map<String, dynamic>> getDeviceStats(String publicKey) async {
+    final db = await database;
+    final total = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM $tableSamples WHERE device_id = ? AND pingSuccess IS NOT NULL',
+      [publicKey],
+    )) ?? 0;
+    final successes = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM $tableSamples WHERE device_id = ? AND pingSuccess = 1',
+      [publicKey],
+    )) ?? 0;
+    final failures = total - successes;
+    final cells = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(DISTINCT substr(geohash, 1, 6)) FROM $tableSamples WHERE device_id = ? AND pingSuccess IS NOT NULL',
+      [publicKey],
+    )) ?? 0;
+    
+    final avgResp = await db.rawQuery(
+      'SELECT AVG(response_time_ms) as avg_resp FROM $tableSamples WHERE device_id = ? AND response_time_ms IS NOT NULL',
+      [publicKey],
+    );
+    final avgResponseMs = (avgResp.first['avg_resp'] as num?)?.toDouble();
+    
+    final avgSignal = await db.rawQuery(
+      'SELECT AVG(snr) as avg_snr, AVG(rssi) as avg_rssi FROM $tableSamples WHERE device_id = ? AND pingSuccess = 1',
+      [publicKey],
+    );
+    final avgSnr = (avgSignal.first['avg_snr'] as num?)?.toDouble();
+    final avgRssi = (avgSignal.first['avg_rssi'] as num?)?.toDouble();
+    
+    return {
+      'totalPings': total,
+      'successes': successes,
+      'failures': failures,
+      'successRate': total > 0 ? successes / total : 0.0,
+      'uniqueCells': cells,
+      'avgResponseMs': avgResponseMs,
+      'avgSnr': avgSnr,
+      'avgRssi': avgRssi,
+    };
   }
 
   // ============================================================================

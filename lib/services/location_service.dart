@@ -89,6 +89,7 @@ class LocationService {
   final Set<String> _deadZoneAlertedCells = {};
   final _deadZoneController = StreamController<String>.broadcast();
   Stream<String> get deadZoneStream => _deadZoneController.stream;
+  bool _deadZoneAlertsEnabled = true;
   
   // Battery saver mode
   final Battery _battery = Battery();
@@ -338,6 +339,17 @@ class LocationService {
       
       // Start monitoring device battery for battery saver mode
       _startBatteryMonitoring();
+      
+      // Load alert settings
+      _deadZoneAlertsEnabled = await _settings.getDeadZoneAlertsEnabled();
+      
+      // Store connected device in DB if available
+      final deviceId = _loraCompanion.connectedDeviceId;
+      if (deviceId != null) {
+        final deviceName = _loraCompanion.deviceName ?? 'Unknown';
+        final connType = _loraCompanion.connectionType == ConnectionType.bluetooth ? 'bluetooth' : 'usb';
+        await _dbService.upsertDevice(deviceId, deviceName, connType);
+      }
       
       // Reset distance tracking for new session
       _totalDistanceMeters = 0.0;
@@ -672,6 +684,7 @@ class LocationService {
   
   /// Check if the current position is in a known dead zone and alert once per cell
   void _checkDeadZone(LatLng latLng) async {
+    if (!_deadZoneAlertsEnabled) return;
     try {
       final precision = await _settings.getCoveragePrecision();
       final cellHash = GeohashUtils.coverageKey(
@@ -757,6 +770,7 @@ class LocationService {
         pingSuccess: pingSuccess,
         responseTimeMs: pingResult.responseTimeMs,
         ductingRisk: ductingRisk,
+        deviceId: _loraCompanion.connectedDeviceId,
       );
       
       // Save ping result as new sample
@@ -777,6 +791,7 @@ class LocationService {
         rssi: null,
         snr: null,
         pingSuccess: false,
+        deviceId: _loraCompanion.connectedDeviceId,
       );
       await _dbService.insertSample(sample);
       // Notify listeners
@@ -953,6 +968,7 @@ class LocationService {
         geohash: geohash,
         pingSuccess: false,
         ductingRisk: ductingRisk,
+        deviceId: _loraCompanion.connectedDeviceId,
       );
       await _dbService.insertSample(sample);
       _pingEventController.add('failed');
@@ -975,6 +991,7 @@ class LocationService {
           snr: snr,
           pingSuccess: true,
           ductingRisk: ductingRisk,
+          deviceId: _loraCompanion.connectedDeviceId,
         );
         await _dbService.insertSample(sample);
       }

@@ -38,6 +38,29 @@ class SettingsService {
   static const String _deviceNameKey = 'device_name';
   static const String _lockRotationKey = 'lock_rotation_north';
   static const String _showSuccessfulOnlyKey = 'show_successful_only';
+  static const String _deadZoneAlertsKey = 'dead_zone_alerts_enabled';
+  static const String _newRepeaterAlertsKey = 'new_repeater_alerts_enabled';
+  
+  // Alert toggles
+  Future<bool> getDeadZoneAlertsEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_deadZoneAlertsKey) ?? true;
+  }
+  
+  Future<void> setDeadZoneAlertsEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_deadZoneAlertsKey, value);
+  }
+  
+  Future<bool> getNewRepeaterAlertsEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_newRepeaterAlertsKey) ?? true;
+  }
+  
+  Future<void> setNewRepeaterAlertsEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_newRepeaterAlertsKey, value);
+  }
   
   Future<bool> getShowSamples() async {
     final prefs = await SharedPreferences.getInstance();

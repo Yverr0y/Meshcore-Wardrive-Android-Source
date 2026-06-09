@@ -12,6 +12,7 @@ class Sample {
   final int? responseTimeMs;
   final String? ductingRisk;
   final String? source; // Device/operator name for multi-device wardrive
+  final String? deviceId; // LoRa companion device public key prefix
 
   Sample({
     required this.id,
@@ -25,6 +26,7 @@ class Sample {
     this.responseTimeMs,
     this.ductingRisk,
     this.source,
+    this.deviceId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -40,6 +42,7 @@ class Sample {
         'responseTimeMs': responseTimeMs,
         'ductingRisk': ductingRisk,
         'source': source,
+        'deviceId': deviceId,
       };
 
   factory Sample.fromJson(Map<String, dynamic> json) {
@@ -58,6 +61,7 @@ class Sample {
       responseTimeMs: (json['responseTimeMs'] as num?)?.toInt(),
       ductingRisk: json['ductingRisk'] as String?,
       source: json['source'] as String?,
+      deviceId: json['deviceId'] as String?,
     );
   }
 
@@ -74,6 +78,7 @@ class Sample {
         'response_time_ms': responseTimeMs,
         'ducting_risk': ductingRisk,
         'source': source,
+        'device_id': deviceId,
       };
 
   factory Sample.fromMap(Map<String, dynamic> map) {
@@ -90,6 +95,7 @@ class Sample {
       responseTimeMs: map['response_time_ms'] as int?,
       ductingRisk: map['ducting_risk'] as String?,
       source: map['source'] as String?,
+      deviceId: map['device_id'] as String?,
     );
   }
 }

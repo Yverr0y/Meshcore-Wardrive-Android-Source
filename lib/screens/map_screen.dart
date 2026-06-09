@@ -42,6 +42,7 @@ import '../services/sound_service.dart';
 import '../services/tile_download_service.dart';
 import 'analytics_screen.dart';
 import 'achievements_screen.dart';
+import 'device_comparison_screen.dart';
 import 'repeater_health_screen.dart';
 import '../services/achievement_service.dart';
 
@@ -180,6 +181,10 @@ class _MapScreenState extends State<MapScreen> {
   // Quick settings overlay
   bool _showQuickSettings = false;
   
+  // Alert toggles
+  bool _deadZoneAlertsEnabled = true;
+  bool _newRepeaterAlertsEnabled = true;
+  
   // Carpeater mode
   bool _carpeaterEnabled = false;
   String? _carpeaterRepeaterId;
@@ -294,6 +299,14 @@ class _MapScreenState extends State<MapScreen> {
     // Check achievements on startup
     AchievementService().checkAndUnlock();
     
+    // Load known repeater IDs from DB so only truly new ones trigger alerts
+    final knownIds = await DatabaseService().getDistinctRepeaterIds();
+    await _locationService.loraCompanion.loadKnownRepeaterIds(knownIds);
+    
+    // Load alert toggle settings
+    final newRepeaterAlerts = await _settingsService.getNewRepeaterAlertsEnabled();
+    _locationService.loraCompanion.setNewRepeaterAlertsEnabled(newRepeaterAlerts);
+    
     // Subscribe to distance updates (no setState — updated in _loadSamples cycle)
     _distanceSubscription = _locationService.totalDistanceStream.listen((distance) {
       if (mounted) {
@@ -390,6 +403,14 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _lockRotationNorth = lockRotation;
       _showSuccessfulOnly = showSuccessfulOnly;
+    });
+    
+    // Load alert toggles
+    final deadZoneAlerts = await _settingsService.getDeadZoneAlertsEnabled();
+    final newRepeaterAlerts = await _settingsService.getNewRepeaterAlertsEnabled();
+    setState(() {
+      _deadZoneAlertsEnabled = deadZoneAlerts;
+      _newRepeaterAlertsEnabled = newRepeaterAlerts;
     });
     
     // Load Carpeater settings
@@ -2884,6 +2905,27 @@ $placemarks  </Document>
                 SoundService().setVibrationEnabled(value);
               },
             ),
+            SwitchListTile(
+              title: const Text('Dead Zone Alerts'),
+              subtitle: const Text('Notify when entering a known dead zone'),
+              value: _deadZoneAlertsEnabled,
+              onChanged: (value) async {
+                setState(() { _deadZoneAlertsEnabled = value; });
+                setModalState(() {});
+                await _settingsService.setDeadZoneAlertsEnabled(value);
+              },
+            ),
+            SwitchListTile(
+              title: const Text('New Repeater Alerts'),
+              subtitle: const Text('Notify when a never-before-seen repeater is discovered'),
+              value: _newRepeaterAlertsEnabled,
+              onChanged: (value) async {
+                setState(() { _newRepeaterAlertsEnabled = value; });
+                setModalState(() {});
+                await _settingsService.setNewRepeaterAlertsEnabled(value);
+                _locationService.loraCompanion.setNewRepeaterAlertsEnabled(value);
+              },
+            ),
             const Divider(),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -3497,6 +3539,21 @@ $placemarks  </Document>
                   context,
                   MaterialPageRoute(
                     builder: (context) => const AchievementsScreen(),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              title: const Text('Device Comparison'),
+              subtitle: const Text('Compare LoRa companion performance'),
+              leading: const Icon(Icons.devices),
+              trailing: const Icon(Icons.arrow_forward),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const DeviceComparisonScreen(),
                   ),
                 );
               },

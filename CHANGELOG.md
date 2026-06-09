@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.40 - 2026-06-09
+
+### Added
+- **Device Tracking & Comparison**: The app now logs which LoRa companion device (by Bluetooth ID and name) you use for each wardrive session. View all paired devices and their performance stats in the new Device Comparison screen (Settings → Data Management). Compare two devices side-by-side: success rate, fail rate, total pings, unique cells, avg response time, avg SNR, and avg RSSI.
+- **Dead Zone Alert Toggle**: New setting to enable/disable the "Entering known dead zone" notification
+- **New Repeater Alert Toggle**: New setting to enable/disable the new repeater discovery notification
+
+### Fixed
+- **New Repeater Discovery Alert**: Now only fires for repeaters that have truly never been seen before in the database. Previously the in-memory set reset on every app restart, causing false "new" alerts. Known repeater IDs are loaded from sample history on startup.
+
+### Technical
+- Database version 11 → 12: new `devices` table, new `device_id` column on samples
+- `LoRaCompanionService`: captures connected device ID (BT remoteId for Bluetooth, product name for USB)
+- All ping samples (distance, time, and carpeater) tagged with `device_id`
+- `DatabaseService`: device CRUD, per-device stats queries (success rate, avg SNR/RSSI/response time, unique cells)
+- New `device_comparison_screen.dart` with device cards and side-by-side comparison table
+- `SettingsService`: `deadZoneAlertsEnabled` and `newRepeaterAlertsEnabled` toggles
+
 ## v1.0.39 - 2026-06-08
 
 ### Added
