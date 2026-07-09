@@ -209,8 +209,12 @@ class AggregationService {
       // Calculate success rate
       final successRate = received / total;
       
+      // Floor: if a cell has ANY confirmed coverage, never show worse than yellow.
+      // A cell that has been reached at least once is not a true dead zone.
+      final effectiveRate = (received > 0 && successRate < 0.30) ? 0.30 : successRate;
+      
       // Use color blind palette for quality-based coloring
-      return ColorBlindPalette.getQualityColor(colorBlindMode, successRate).value;
+      return ColorBlindPalette.getQualityColor(colorBlindMode, effectiveRate).value;
     }
   }
 

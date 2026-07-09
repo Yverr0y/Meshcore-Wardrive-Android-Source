@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.41 - 2026-07-09
+
+### Added
+- **#22 Community Coverage Download**: Download coverage data from your configured web map for offline viewing. Go to Settings → Data Management → "Download Community Coverage" to fetch, then toggle "Community Coverage" in map layers to show a blue-tinted overlay of all community wardrive data.
+
+### Fixed
+- **#27 Permissions/ping failure on fresh install**: Fresh installs of v1.0.40 created the samples table without the `device_id` column, causing all sample inserts to fail silently. Coverage squares and pings appeared to not work. Fixed `_onCreate` schema and added defensive error handling around device tracking.
+- **#24 Static GPS Blue Dot**: GPS blue dot was only updating every 5 seconds (on the timer-driven `_loadSamples` cycle). Now updates in real-time via `setState()` on every GPS position update.
+- **#23 Coverage boxes reverting to red**: Cells with confirmed coverage (at least one successful ping) will no longer drop below yellow, even if subsequent drives through the area fail. Only cells with zero successful pings show as red.
+
+### Technical
+- `_onCreate` now includes `device_id` column and `devices` table for fresh installs
+- Device tracking `upsertDevice()` call wrapped in try/catch to prevent cascade failures
+- Position stream listener now triggers `setState()` for immediate blue dot movement
+- Coverage color logic floors at 30% success rate when `received > 0`
+
 ## v1.0.40 - 2026-06-09
 
 ### Added

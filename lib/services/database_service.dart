@@ -52,7 +52,20 @@ class DatabaseService {
         uploaded INTEGER DEFAULT 0,
         response_time_ms INTEGER,
         ducting_risk TEXT,
-        source TEXT
+        source TEXT,
+        device_id TEXT
+      )
+    ''');
+    
+    // Create devices table
+    await db.execute('''
+      CREATE TABLE $tableDevices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_key TEXT UNIQUE NOT NULL,
+        name TEXT,
+        connection_type TEXT,
+        first_used INTEGER NOT NULL,
+        last_used INTEGER NOT NULL
       )
     ''');
 

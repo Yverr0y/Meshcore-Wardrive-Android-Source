@@ -344,11 +344,15 @@ class LocationService {
       _deadZoneAlertsEnabled = await _settings.getDeadZoneAlertsEnabled();
       
       // Store connected device in DB if available
-      final deviceId = _loraCompanion.connectedDeviceId;
-      if (deviceId != null) {
-        final deviceName = _loraCompanion.deviceName ?? 'Unknown';
-        final connType = _loraCompanion.connectionType == ConnectionType.bluetooth ? 'bluetooth' : 'usb';
-        await _dbService.upsertDevice(deviceId, deviceName, connType);
+      try {
+        final deviceId = _loraCompanion.connectedDeviceId;
+        if (deviceId != null) {
+          final deviceName = _loraCompanion.deviceName ?? 'Unknown';
+          final connType = _loraCompanion.connectionType == ConnectionType.bluetooth ? 'bluetooth' : 'usb';
+          await _dbService.upsertDevice(deviceId, deviceName, connType);
+        }
+      } catch (e) {
+        await _logger.logError('Device Tracking', e.toString());
       }
       
       // Reset distance tracking for new session

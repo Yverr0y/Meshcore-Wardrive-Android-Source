@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'database_service.dart';
 import '../models/models.dart';
@@ -201,8 +203,50 @@ class UploadService {
   
   /// Upload only samples since last upload (deprecated - use uploadAllSamples instead)
   Future<UploadResult> uploadNewSamples({Map<String, String>? repeaterNames}) async {
-    // Just redirect to uploadAllSamples since it now only uploads unuploaded samples
     return uploadAllSamples(repeaterNames: repeaterNames);
+  }
+  
+  /// Download community coverage data from a map endpoint.
+  /// Returns the parsed coverage map, or null on failure.
+  /// Also caches to a local file for offline viewing.
+  Future<Map<String, dynamic>?> downloadCoverage(String apiUrl) async {
+    try {
+      final response = await http.get(
+        Uri.parse(apiUrl),
+        headers: {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 30));
+      
+      if (response.statusCode != 200) return null;
+      
+      final data = jsonDecode(response.body);
+      
+      // Cache locally for offline access
+      final dir = await _getAppDir();
+      final cacheFile = File('${dir.path}/community_coverage.json');
+      await cacheFile.writeAsString(response.body);
+      
+      return data as Map<String, dynamic>;
+    } catch (e) {
+      print('Download coverage failed: $e');
+      return null;
+    }
+  }
+  
+  /// Load cached community coverage from local file
+  Future<Map<String, dynamic>?> loadCachedCoverage() async {
+    try {
+      final dir = await _getAppDir();
+      final cacheFile = File('${dir.path}/community_coverage.json');
+      if (!await cacheFile.exists()) return null;
+      final json = await cacheFile.readAsString();
+      return jsonDecode(json) as Map<String, dynamic>;
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  Future<Directory> _getAppDir() async {
+    return await getApplicationDocumentsDirectory();
   }
   
   /// Get list of configured upload endpoints

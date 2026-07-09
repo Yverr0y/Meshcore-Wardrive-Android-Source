@@ -185,6 +185,10 @@ class _MapScreenState extends State<MapScreen> {
   bool _deadZoneAlertsEnabled = true;
   bool _newRepeaterAlertsEnabled = true;
   
+  // Community coverage (downloaded from web map)
+  Map<String, dynamic>? _communityCoverage;
+  bool _showCommunityCoverage = false;
+  
   // Carpeater mode
   bool _carpeaterEnabled = false;
   String? _carpeaterRepeaterId;
@@ -230,10 +234,12 @@ class _MapScreenState extends State<MapScreen> {
     // Subscribe to position updates
     _positionSubscription = _locationService.currentPositionStream.listen((position) {
       if (!mounted) return;
-      _currentPosition = position;
+      setState(() {
+        _currentPosition = position;
+      });
       
       // Auto-follow if enabled (throttled to reduce map redraws)
-      if (_followLocation && position != null) {
+      if (_followLocation) {
         final now = DateTime.now();
         if (now.difference(_lastAutoFollowMove) >= _autoFollowInterval) {
           _lastAutoFollowMove = now;
@@ -327,6 +333,14 @@ class _MapScreenState extends State<MapScreen> {
     
     await _loadSamples();
     await _getCurrentLocation();
+    
+    // Load cached community coverage for offline viewing
+    final cached = await _uploadService.loadCachedCoverage();
+    if (cached != null && cached['coverage'] != null) {
+      setState(() {
+        _communityCoverage = cached['coverage'] as Map<String, dynamic>;
+      });
+    }
     
     // Update periodically
     _updateTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -1657,6 +1671,7 @@ $placemarks  </Document>
         if (_showHeatmap) _buildHeatmapLayer(),
         if (_showPredictionRings) _buildPredictionRingsLayer(),
         _buildPrivacyZonesLayer(),
+        if (_showCommunityCoverage && _communityCoverage != null) _buildCommunityCoverageLayer(),
         if (_showCoverage) ..._buildCoverageLayers(),
         if (_showSamples) _buildSampleLayer(),
         if (_showEdges) _buildEdgeLayer(),
@@ -2840,6 +2855,17 @@ $placemarks  </Document>
               },
             ),
             SwitchListTile(
+              title: const Text('Community Coverage'),
+              subtitle: Text(_communityCoverage != null
+                  ? 'Show downloaded coverage from web map'
+                  : 'Download first from Data Management'),
+              value: _showCommunityCoverage,
+              onChanged: _communityCoverage != null ? (value) {
+                setState(() { _showCommunityCoverage = value; });
+                setModalState(() {});
+              } : null,
+            ),
+            SwitchListTile(
               title: const Text('Show Heatmap'),
               subtitle: const Text('Heat gradient overlay of ping activity'),
               value: _showHeatmap,
@@ -3556,6 +3582,18 @@ $placemarks  </Document>
                     builder: (context) => const DeviceComparisonScreen(),
                   ),
                 );
+              },
+            ),
+            ListTile(
+              title: const Text('Download Community Coverage'),
+              subtitle: Text(_communityCoverage != null
+                  ? 'Cached — toggle in map layers'
+                  : 'Pull coverage data from web map'),
+              leading: const Icon(Icons.cloud_download),
+              trailing: const Icon(Icons.arrow_forward),
+              onTap: () {
+                Navigator.pop(context);
+                _downloadCommunityCoverage();
               },
             ),
             ListTile(
@@ -5132,6 +5170,105 @@ $placemarks  </Document>
         ],
       ),
     );
+  }
+
+  Future<void> _downloadCommunityCoverage() async {
+    // Get endpoint to download from
+    final endpoints = await _uploadService.getUploadEndpoints();
+    
+    String? selectedUrl;
+    if (endpoints.length == 1) {
+      selectedUrl = endpoints.first.url;
+    } else {
+      // Let user pick which endpoint to download from
+      if (!mounted) return;
+      selectedUrl = await showDialog<String>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('Download from'),
+          children: endpoints.map((e) => SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, e.url),
+            child: Text(e.name),
+          )).toList(),
+        ),
+      );
+    }
+    
+    if (selectedUrl == null) return;
+    
+    _showSnackBar('Downloading coverage data...');
+    
+    final data = await _uploadService.downloadCoverage(selectedUrl);
+    if (data != null && data['coverage'] != null) {
+      final coverage = data['coverage'] as Map<String, dynamic>;
+      setState(() {
+        _communityCoverage = coverage;
+        _showCommunityCoverage = true;
+      });
+      _showSnackBar('Downloaded ${coverage.length} coverage cells');
+    } else {
+      // Try loading from cache
+      final cached = await _uploadService.loadCachedCoverage();
+      if (cached != null && cached['coverage'] != null) {
+        setState(() {
+          _communityCoverage = cached['coverage'] as Map<String, dynamic>;
+          _showCommunityCoverage = true;
+        });
+        _showSnackBar('Loaded cached coverage (offline)');
+      } else {
+        _showSnackBar('Failed to download coverage data');
+      }
+    }
+  }
+  
+  Widget _buildCommunityCoverageLayer() {
+    if (_communityCoverage == null) return const SizedBox.shrink();
+    
+    final polygons = <Polygon>[];
+    final bounds = _mapController.camera.visibleBounds;
+    
+    _communityCoverage!.forEach((hash, cellData) {
+      if (cellData is! Map<String, dynamic>) return;
+      final received = (cellData['received'] as num?)?.toDouble() ?? 0;
+      final lost = (cellData['lost'] as num?)?.toDouble() ?? 0;
+      final total = received + lost;
+      if (total == 0) return;
+      
+      // Decode geohash to center position
+      try {
+        final center = GeohashUtils.posFromHash(hash);
+        
+        // Viewport culling
+        if (!bounds.contains(center)) return;
+        
+        final successRate = received / total;
+        final color = successRate >= 0.7 ? const Color(0x5500BBFF)
+            : successRate >= 0.3 ? const Color(0x5500BBFF)
+            : const Color(0x55FF8800);
+        
+        // Approximate cell size from geohash precision
+        final precision = hash.length;
+        final latDelta = precision >= 7 ? 0.0007 : precision >= 6 ? 0.005 : 0.04;
+        final lonDelta = precision >= 7 ? 0.001 : precision >= 6 ? 0.01 : 0.08;
+        
+        final points = [
+          LatLng(center.latitude - latDelta, center.longitude - lonDelta),
+          LatLng(center.latitude - latDelta, center.longitude + lonDelta),
+          LatLng(center.latitude + latDelta, center.longitude + lonDelta),
+          LatLng(center.latitude + latDelta, center.longitude - lonDelta),
+        ];
+        
+        polygons.add(Polygon(
+          points: points,
+          color: color,
+          borderColor: const Color(0x8800AAEE),
+          borderStrokeWidth: 1,
+          isFilled: true,
+        ));
+      } catch (_) {}
+    });
+    
+    return PolygonLayer(polygons: polygons);
   }
 
   Future<UploadEndpoint?> _showEditEndpointDialog(UploadEndpoint existing) async {
