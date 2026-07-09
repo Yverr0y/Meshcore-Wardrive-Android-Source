@@ -1640,6 +1640,7 @@ $placemarks  </Document>
               ? InteractiveFlag.all & ~InteractiveFlag.rotate  // Disable rotation
               : InteractiveFlag.all,  // Allow all interactions
         ),
+        onTap: (tapPosition, point) => _handleMapTap(point),
         onLongPress: (tapPosition, point) => _handleMapLongPress(point),
         onMapEvent: (event) {
           // Disable follow mode if user manually pans/drags the map
@@ -2864,6 +2865,19 @@ $placemarks  </Document>
                 setState(() { _showCommunityCoverage = value; });
                 setModalState(() {});
               } : null,
+              secondary: _communityCoverage != null ? IconButton(
+                icon: const Icon(Icons.delete_outline, size: 20),
+                tooltip: 'Clear downloaded coverage',
+                onPressed: () async {
+                  await _uploadService.clearCachedCoverage();
+                  setState(() {
+                    _communityCoverage = null;
+                    _showCommunityCoverage = false;
+                  });
+                  setModalState(() {});
+                  _showSnackBar('Community coverage cleared');
+                },
+              ) : null,
             ),
             SwitchListTile(
               title: const Text('Show Heatmap'),
@@ -5198,7 +5212,9 @@ $placemarks  </Document>
     
     _showSnackBar('Downloading coverage data...');
     
-    final data = await _uploadService.downloadCoverage(selectedUrl);
+    final data = await _uploadService.downloadCoverage(selectedUrl, onProgress: (current, total) {
+      // Update snackbar with progress (won't stack, just shows latest)
+    });
     if (data != null && data['coverage'] != null) {
       final coverage = data['coverage'] as Map<String, dynamic>;
       setState(() {
@@ -5216,7 +5232,7 @@ $placemarks  </Document>
         });
         _showSnackBar('Loaded cached coverage (offline)');
       } else {
-        _showSnackBar('Failed to download coverage data');
+      _showSnackBar('Download failed: ${_uploadService.lastDownloadError ?? 'unknown error'}');
       }
     }
   }
@@ -5242,9 +5258,9 @@ $placemarks  </Document>
         if (!bounds.contains(center)) return;
         
         final successRate = received / total;
-        final color = successRate >= 0.7 ? const Color(0x5500BBFF)
-            : successRate >= 0.3 ? const Color(0x5500BBFF)
-            : const Color(0x55FF8800);
+        final color = successRate >= 0.7 ? const Color(0x4400CC00)
+            : successRate >= 0.3 ? const Color(0x44CCCC00)
+            : const Color(0x44CC0000);
         
         // Approximate cell size from geohash precision
         final precision = hash.length;
@@ -5269,6 +5285,84 @@ $placemarks  </Document>
     });
     
     return PolygonLayer(polygons: polygons);
+  }
+
+  void _handleMapTap(LatLng point) {
+    if (!_showCommunityCoverage || _communityCoverage == null) return;
+    
+    // Check if tap hits a community coverage cell
+    for (final entry in _communityCoverage!.entries) {
+      final hash = entry.key;
+      final cellData = entry.value;
+      if (cellData is! Map<String, dynamic>) continue;
+      
+      try {
+        final center = GeohashUtils.posFromHash(hash);
+        final precision = hash.length;
+        final latDelta = precision >= 7 ? 0.0007 : precision >= 6 ? 0.005 : 0.04;
+        final lonDelta = precision >= 7 ? 0.001 : precision >= 6 ? 0.01 : 0.08;
+        
+        if (point.latitude >= center.latitude - latDelta &&
+            point.latitude <= center.latitude + latDelta &&
+            point.longitude >= center.longitude - lonDelta &&
+            point.longitude <= center.longitude + lonDelta) {
+          _showCommunityCellInfo(hash, cellData);
+          return;
+        }
+      } catch (_) {}
+    }
+  }
+  
+  void _showCommunityCellInfo(String hash, Map<String, dynamic> cell) {
+    final received = (cell['received'] as num?)?.toDouble() ?? 0;
+    final lost = (cell['lost'] as num?)?.toDouble() ?? 0;
+    final total = received + lost;
+    final samples = cell['samples'] ?? 0;
+    final successRate = total > 0 ? ((received / total) * 100).toStringAsFixed(1) : '0';
+    final lastUpdate = cell['lastUpdate'] as String? ?? 'Unknown';
+    final appVersion = cell['appVersion'] as String? ?? 'Unknown';
+    
+    // Build repeater list
+    String repeatersText = 'None';
+    final repeaters = cell['repeaters'];
+    if (repeaters is Map<String, dynamic> && repeaters.isNotEmpty) {
+      repeatersText = repeaters.entries.map((e) {
+        final rep = e.value as Map<String, dynamic>;
+        final name = rep['name'] ?? e.key;
+        final rssi = rep['rssi'];
+        final snr = rep['snr'];
+        return '$name${rssi != null ? ' (RSSI: $rssi' : ''}${snr != null ? ', SNR: $snr)' : rssi != null ? ')' : ''}';
+      }).join('\n');
+    }
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Community Coverage'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Success Rate: $successRate%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 8),
+            Text('Received: ${received.toStringAsFixed(1)}'),
+            Text('Lost: ${lost.toStringAsFixed(1)}'),
+            Text('Samples: $samples'),
+            const SizedBox(height: 8),
+            const Text('Repeaters:', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(repeatersText, style: const TextStyle(fontSize: 12)),
+            const SizedBox(height: 8),
+            Text('Last Update: ${DateTime.tryParse(lastUpdate)?.toLocal().toString().substring(0, 16) ?? lastUpdate}',
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            Text('App Version: $appVersion',
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
   }
 
   Future<UploadEndpoint?> _showEditEndpointDialog(UploadEndpoint existing) async {

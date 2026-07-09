@@ -1,9 +1,17 @@
 # Changelog
 
+## v1.0.41.1 - 2026-07-09
+
+### Fixed
+- **Community Coverage Download**: Now works with Cloudflare live map (sharded KV format). Fetches all shards in batches for full coverage download.
+- **Community coverage colors**: Cells now use green/yellow/red quality colors instead of solid blue
+- **Tap community cells**: Tap any community coverage cell to view success rate, repeaters (with RSSI/SNR), sample count, and last update
+- **Clear community data**: Trash icon on the Community Coverage toggle to delete cached data
+
 ## v1.0.41 - 2026-07-09
 
 ### Added
-- **#22 Community Coverage Download**: Download coverage data from your configured web map for offline viewing. Go to Settings → Data Management → "Download Community Coverage" to fetch, then toggle "Community Coverage" in map layers to show a blue-tinted overlay of all community wardrive data.
+- **#22 Community Coverage Download**: Download coverage data from your configured web map for offline viewing. Go to Settings → Data Management → "Download Community Coverage" to fetch, then toggle "Community Coverage" in map layers to show coverage from all community wardrive data.
 
 ### Fixed
 - **#27 Permissions/ping failure on fresh install**: Fresh installs of v1.0.40 created the samples table without the `device_id` column, causing all sample inserts to fail silently. Coverage squares and pings appeared to not work. Fixed `_onCreate` schema and added defensive error handling around device tracking.

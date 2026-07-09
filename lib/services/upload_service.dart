@@ -209,24 +209,91 @@ class UploadService {
   /// Download community coverage data from a map endpoint.
   /// Returns the parsed coverage map, or null on failure.
   /// Also caches to a local file for offline viewing.
-  Future<Map<String, dynamic>?> downloadCoverage(String apiUrl) async {
+  /// [error] is set with a description if the download fails.
+  String? lastDownloadError;
+  
+  Future<Map<String, dynamic>?> downloadCoverage(String apiUrl, {Function(int current, int total)? onProgress}) async {
+    lastDownloadError = null;
     try {
+      print('Downloading coverage from: $apiUrl');
       final response = await http.get(
         Uri.parse(apiUrl),
         headers: {'Accept': 'application/json'},
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(const Duration(seconds: 60));
       
-      if (response.statusCode != 200) return null;
+      if (response.statusCode != 200) {
+        lastDownloadError = 'Server returned ${response.statusCode}';
+        return null;
+      }
       
       final data = jsonDecode(response.body);
+      if (data is! Map<String, dynamic>) {
+        lastDownloadError = 'Invalid response format';
+        return null;
+      }
       
-      // Cache locally for offline access
+      // --- Sharded format (Cloudflare KV) ---
+      if (data.containsKey('shards') && !data.containsKey('coverage')) {
+        final shards = data['shards'] as Map<String, dynamic>;
+        final prefixes = shards.keys.toList();
+        print('Sharded format: ${prefixes.length} shards to fetch');
+        
+        final allCoverage = <String, dynamic>{};
+        
+        // Fetch in batches of 10 prefixes
+        const batchSize = 10;
+        final totalBatches = (prefixes.length / batchSize).ceil();
+        
+        for (int i = 0; i < totalBatches; i++) {
+          final start = i * batchSize;
+          final end = (start + batchSize).clamp(0, prefixes.length);
+          final batch = prefixes.sublist(start, end);
+          
+          if (onProgress != null) onProgress(i + 1, totalBatches);
+          
+          try {
+            final batchResp = await http.get(
+              Uri.parse('$apiUrl?prefixes=${batch.join(',')}'),
+              headers: {'Accept': 'application/json'},
+            ).timeout(const Duration(seconds: 30));
+            
+            if (batchResp.statusCode == 200) {
+              final batchData = jsonDecode(batchResp.body);
+              if (batchData is Map<String, dynamic> && batchData['coverage'] != null) {
+                final cov = batchData['coverage'] as Map<String, dynamic>;
+                allCoverage.addAll(cov);
+              }
+            }
+          } catch (e) {
+            print('Shard batch ${i+1} failed: $e');
+            // Continue with remaining batches
+          }
+        }
+        
+        if (allCoverage.isEmpty) {
+          lastDownloadError = 'No coverage data received from shards';
+          return null;
+        }
+        
+        final result = {'coverage': allCoverage};
+        
+        // Cache locally
+        final dir = await _getAppDir();
+        final cacheFile = File('${dir.path}/community_coverage.json');
+        await cacheFile.writeAsString(jsonEncode(result));
+        
+        print('Downloaded ${allCoverage.length} coverage cells from ${prefixes.length} shards');
+        return result;
+      }
+      
+      // --- Legacy format (Docker map) ---
       final dir = await _getAppDir();
       final cacheFile = File('${dir.path}/community_coverage.json');
       await cacheFile.writeAsString(response.body);
       
-      return data as Map<String, dynamic>;
+      return data;
     } catch (e) {
+      lastDownloadError = e.toString();
       print('Download coverage failed: $e');
       return null;
     }
@@ -242,6 +309,15 @@ class UploadService {
       return jsonDecode(json) as Map<String, dynamic>;
     } catch (e) {
       return null;
+    }
+  }
+  
+  /// Delete cached community coverage
+  Future<void> clearCachedCoverage() async {
+    final dir = await _getAppDir();
+    final cacheFile = File('${dir.path}/community_coverage.json');
+    if (await cacheFile.exists()) {
+      await cacheFile.delete();
     }
   }
   
