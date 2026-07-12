@@ -43,6 +43,7 @@ import '../services/tile_download_service.dart';
 import 'analytics_screen.dart';
 import 'achievements_screen.dart';
 import 'device_comparison_screen.dart';
+import 'ducting_forecast_screen.dart';
 import 'repeater_health_screen.dart';
 import '../services/achievement_service.dart';
 
@@ -2903,6 +2904,21 @@ $placemarks  </Document>
                 });
                 setModalState(() {});
                 await _settingsService.setShowPredictionRings(value);
+              },
+            ),
+            ListTile(
+              title: const Text('Ducting Forecast'),
+              subtitle: const Text('6-day tropospheric ducting maps'),
+              leading: const Icon(Icons.cloud),
+              trailing: const Icon(Icons.arrow_forward),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const DuctingForecastScreen(),
+                  ),
+                );
               },
             ),
             SwitchListTile(

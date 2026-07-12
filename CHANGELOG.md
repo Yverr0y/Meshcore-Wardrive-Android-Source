@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.42 - 2026-07-12
+
+### Added
+- **Tropospheric Ducting Forecast**: View 6-day VHF/UHF ducting forecast maps from dxinfocentre.com. Select from 23 global regions, scrub through 28 forecast frames (3h intervals for first 36h, 6h intervals after), pinch to zoom, and animate with playback controls. Region selection persists between sessions. Access from Settings under the Atmospheric Ducting section.
+
 ## v1.0.41.1 - 2026-07-09
 
 ### Fixed
