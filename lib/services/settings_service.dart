@@ -40,6 +40,7 @@ class SettingsService {
   static const String _showSuccessfulOnlyKey = 'show_successful_only';
   static const String _deadZoneAlertsKey = 'dead_zone_alerts_enabled';
   static const String _newRepeaterAlertsKey = 'new_repeater_alerts_enabled';
+  static const String _batterySaverEnabledKey = 'battery_saver_enabled';
   
   // Alert toggles
   Future<bool> getDeadZoneAlertsEnabled() async {
@@ -60,6 +61,16 @@ class SettingsService {
   Future<void> setNewRepeaterAlertsEnabled(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_newRepeaterAlertsKey, value);
+  }
+  
+  Future<bool> getBatterySaverEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_batterySaverEnabledKey) ?? true;
+  }
+  
+  Future<void> setBatterySaverEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_batterySaverEnabledKey, value);
   }
   
   Future<bool> getShowSamples() async {

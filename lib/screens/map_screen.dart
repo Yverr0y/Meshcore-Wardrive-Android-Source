@@ -185,6 +185,7 @@ class _MapScreenState extends State<MapScreen> {
   // Alert toggles
   bool _deadZoneAlertsEnabled = true;
   bool _newRepeaterAlertsEnabled = true;
+  bool _batterySaverEnabled = true;
   
   // Community coverage (downloaded from web map)
   Map<String, dynamic>? _communityCoverage;
@@ -423,9 +424,11 @@ class _MapScreenState extends State<MapScreen> {
     // Load alert toggles
     final deadZoneAlerts = await _settingsService.getDeadZoneAlertsEnabled();
     final newRepeaterAlerts = await _settingsService.getNewRepeaterAlertsEnabled();
+    final batterySaver = await _settingsService.getBatterySaverEnabled();
     setState(() {
       _deadZoneAlertsEnabled = deadZoneAlerts;
       _newRepeaterAlertsEnabled = newRepeaterAlerts;
+      _batterySaverEnabled = batterySaver;
     });
     
     // Load Carpeater settings
@@ -2780,9 +2783,8 @@ $placemarks  </Document>
               title: const Text('Show Coverage Boxes'),
               value: _showCoverage,
               onChanged: (value) async {
-                setState(() {
+                
                   _showCoverage = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowCoverage(value);
               },
@@ -2791,9 +2793,8 @@ $placemarks  </Document>
               title: const Text('Show Samples'),
               value: _showSamples,
               onChanged: (value) async {
-                setState(() {
+                
                   _showSamples = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowSamples(value);
               },
@@ -2802,9 +2803,8 @@ $placemarks  </Document>
               title: const Text('Show Edges'),
               value: _showEdges,
               onChanged: (value) async {
-                setState(() {
+                
                   _showEdges = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowEdges(value);
               },
@@ -2813,9 +2813,8 @@ $placemarks  </Document>
               title: const Text('Show Repeaters'),
               value: _showRepeaters,
               onChanged: (value) async {
-                setState(() {
+                
                   _showRepeaters = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowRepeaters(value);
               },
@@ -2825,9 +2824,8 @@ $placemarks  </Document>
               subtitle: const Text('Show blue GPS-only markers'),
               value: _showGpsSamples,
               onChanged: (value) async {
-                setState(() {
+                
                   _showGpsSamples = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowGpsSamples(value);
               },
@@ -2837,9 +2835,8 @@ $placemarks  </Document>
               subtitle: const Text('Hide failed pings and GPS-only samples'),
               value: _showSuccessfulOnly,
               onChanged: (value) async {
-                setState(() {
+                
                   _showSuccessfulOnly = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowSuccessfulOnly(value);
               },
@@ -2849,9 +2846,8 @@ $placemarks  </Document>
               subtitle: const Text('Draw driven path on map'),
               value: _showRouteTrail,
               onChanged: (value) async {
-                setState(() {
+                
                   _showRouteTrail = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowRouteTrail(value);
               },
@@ -2863,7 +2859,7 @@ $placemarks  </Document>
                   : 'Download first from Data Management'),
               value: _showCommunityCoverage,
               onChanged: _communityCoverage != null ? (value) {
-                setState(() { _showCommunityCoverage = value; });
+                _showCommunityCoverage = value;
                 setModalState(() {});
               } : null,
               secondary: _communityCoverage != null ? IconButton(
@@ -2871,10 +2867,8 @@ $placemarks  </Document>
                 tooltip: 'Clear downloaded coverage',
                 onPressed: () async {
                   await _uploadService.clearCachedCoverage();
-                  setState(() {
-                    _communityCoverage = null;
-                    _showCommunityCoverage = false;
-                  });
+                  _communityCoverage = null;
+                  _showCommunityCoverage = false;
                   setModalState(() {});
                   _showSnackBar('Community coverage cleared');
                 },
@@ -2885,9 +2879,8 @@ $placemarks  </Document>
               subtitle: const Text('Heat gradient overlay of ping activity'),
               value: _showHeatmap,
               onChanged: (value) async {
-                setState(() {
+                
                   _showHeatmap = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowHeatmap(value);
                 // Trigger heatmap rebuild
@@ -2899,9 +2892,8 @@ $placemarks  </Document>
               subtitle: const Text('Estimated repeater coverage radius'),
               value: _showPredictionRings,
               onChanged: (value) async {
-                setState(() {
+                
                   _showPredictionRings = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowPredictionRings(value);
               },
@@ -2926,16 +2918,15 @@ $placemarks  </Document>
               subtitle: const Text('Monitor ducting conditions (needs internet)'),
               value: _showDucting,
               onChanged: (value) async {
-                setState(() {
+                
                   _showDucting = value;
-                });
                 setModalState(() {});
                 await _settingsService.setShowDucting(value);
                 _locationService.setDuctingEnabled(value);
                 if (value) {
                   // Fetch immediately and update badge
                   final risk = await _locationService.ductingService.getLatestRisk();
-                  setState(() { _currentDuctingRisk = risk; });
+                  _currentDuctingRisk = risk;
                 }
               },
             ),
@@ -2944,7 +2935,7 @@ $placemarks  </Document>
               subtitle: const Text('Play tones on ping results'),
               value: _soundEnabled,
               onChanged: (value) async {
-                setState(() { _soundEnabled = value; });
+                _soundEnabled = value;
                 setModalState(() {});
                 await _settingsService.setSoundEnabled(value);
                 SoundService().setEnabled(value);
@@ -2955,7 +2946,7 @@ $placemarks  </Document>
               subtitle: const Text('Haptic feedback on ping results'),
               value: _vibrationEnabled,
               onChanged: (value) async {
-                setState(() { _vibrationEnabled = value; });
+                _vibrationEnabled = value;
                 setModalState(() {});
                 await _settingsService.setVibrationEnabled(value);
                 SoundService().setVibrationEnabled(value);
@@ -2966,7 +2957,7 @@ $placemarks  </Document>
               subtitle: const Text('Notify when entering a known dead zone'),
               value: _deadZoneAlertsEnabled,
               onChanged: (value) async {
-                setState(() { _deadZoneAlertsEnabled = value; });
+                _deadZoneAlertsEnabled = value;
                 setModalState(() {});
                 await _settingsService.setDeadZoneAlertsEnabled(value);
               },
@@ -2976,10 +2967,20 @@ $placemarks  </Document>
               subtitle: const Text('Notify when a never-before-seen repeater is discovered'),
               value: _newRepeaterAlertsEnabled,
               onChanged: (value) async {
-                setState(() { _newRepeaterAlertsEnabled = value; });
+                _newRepeaterAlertsEnabled = value;
                 setModalState(() {});
                 await _settingsService.setNewRepeaterAlertsEnabled(value);
                 _locationService.loraCompanion.setNewRepeaterAlertsEnabled(value);
+              },
+            ),
+            SwitchListTile(
+              title: const Text('Battery Saver'),
+              subtitle: const Text('Auto-double ping interval when battery ≤20%'),
+              value: _batterySaverEnabled,
+              onChanged: (value) async {
+                _batterySaverEnabled = value;
+                setModalState(() {});
+                await _settingsService.setBatterySaverEnabled(value);
               },
             ),
             const Divider(),
@@ -2997,14 +2998,13 @@ $placemarks  </Document>
                   : 'Use a repeater to discover neighbors\nRequires v1.14+ firmware on all repeaters'),
               value: _carpeaterEnabled,
               onChanged: (value) async {
-                setState(() { _carpeaterEnabled = value; });
+                _carpeaterEnabled = value;
                 setModalState(() {});
                 await _settingsService.setCarpeaterEnabled(value);
                 _locationService.setCarpeaterMode(value);
                 // Sync auto-ping UI state after mode switch
-                setState(() {
+                
                   _autoPingEnabled = _locationService.isAutoPingEnabled;
-                });
               },
             ),
             if (_carpeaterEnabled) ...[
@@ -3034,7 +3034,7 @@ $placemarks  </Document>
                     ),
                   );
                   if (result != null) {
-                    setState(() { _carpeaterRepeaterId = result.isEmpty ? null : result; });
+                    _carpeaterRepeaterId = result.isEmpty ? null : result;
                     setModalState(() {});
                     await _settingsService.setCarpeaterRepeaterId(result.isEmpty ? null : result);
                   }
@@ -3066,7 +3066,7 @@ $placemarks  </Document>
                     ),
                   );
                   if (result != null) {
-                    setState(() { _carpeaterPassword = result.isEmpty ? null : result; });
+                    _carpeaterPassword = result.isEmpty ? null : result;
                     setModalState(() {});
                     await _settingsService.setCarpeaterPassword(result.isEmpty ? null : result);
                   }
@@ -3087,7 +3087,7 @@ $placemarks  </Document>
                     DropdownMenuItem(value: 120, child: Text('2m')),
                   ],
                   onChanged: (value) async {
-                    setState(() { _carpeaterInterval = value!; });
+                    _carpeaterInterval = value!;
                     setModalState(() {});
                     await _settingsService.setCarpeaterInterval(value!);
                   },
@@ -3135,9 +3135,8 @@ $placemarks  </Document>
               subtitle: const Text('Prevent map rotation'),
               value: _lockRotationNorth,
               onChanged: (value) async {
-                setState(() {
+                
                   _lockRotationNorth = value;
-                });
                 setModalState(() {});
                 await _settingsService.setLockRotationNorth(value);
               },
@@ -3184,9 +3183,8 @@ $placemarks  </Document>
                   DropdownMenuItem(value: 'redundancy', child: Text('Redundancy')),
                 ],
                 onChanged: (value) async {
-                  setState(() {
+                  
                     _colorMode = value!;
-                  });
                   await _settingsService.setColorMode(value!);
                 },
               ),
@@ -3200,13 +3198,10 @@ $placemarks  </Document>
                   DropdownMenuItem(value: 'km', child: Text('Kilometers')),
                 ],
                 onChanged: (value) async {
-                  setState(() {
-                    _distanceUnit = value!;
-                    // Update displayed distance immediately
-                    _totalDistance = value == 'miles' 
-                        ? _locationService.totalDistanceMiles 
-                        : _locationService.totalDistanceKm;
-                  });
+                  _distanceUnit = value!;
+                  _totalDistance = value == 'miles' 
+                      ? _locationService.totalDistanceMiles 
+                      : _locationService.totalDistanceKm;
                   setModalState(() {});
                   await _settingsService.setDistanceUnit(value!);
                 },
@@ -3221,9 +3216,8 @@ $placemarks  </Document>
                   DropdownMenuItem(value: 'metric', child: Text('L/100km / Litres')),
                 ],
                 onChanged: (value) async {
-                  setState(() {
+                  
                     _fuelUnit = value!;
-                  });
                   setModalState(() {});
                   await _settingsService.setFuelUnit(value!);
                 },
@@ -3240,9 +3234,8 @@ $placemarks  </Document>
                   DropdownMenuItem(value: 'tritanopia', child: Text('Tritanopia')),
                 ],
                 onChanged: (value) async {
-                  setState(() {
+                  
                     _colorBlindMode = value!;
-                  });
                   setModalState(() {});
                   await _settingsService.setColorBlindMode(value!);
                 },
@@ -3262,9 +3255,8 @@ $placemarks  </Document>
                   DropdownMenuItem(value: 30, child: Text('30s')),
                 ],
                 onChanged: (value) async {
-                  setState(() {
+                  
                     _discoveryTimeoutSeconds = value!;
-                  });
                   setModalState(() {});
                   await _settingsService.setDiscoveryTimeout(value!);
                 },
@@ -3297,9 +3289,8 @@ $placemarks  </Document>
               subtitle: const Text('Only show edges for whitelisted repeaters'),
               value: _filterEdgesByWhitelist,
               onChanged: (value) async {
-                setState(() {
+                
                   _filterEdgesByWhitelist = value;
-                });
                 setModalState(() {});
                 await _settingsService.setFilterEdgesByWhitelist(value);
               },
@@ -3314,7 +3305,7 @@ $placemarks  </Document>
                   DropdownMenuItem(value: 'both', child: Text('Both')),
                 ],
                 onChanged: (value) async {
-                  setState(() { _pingMode = value!; });
+                  _pingMode = value!;
                   setModalState(() {});
                   await _settingsService.setPingMode(value!);
                   _locationService.setPingMode(value!);
@@ -3346,7 +3337,7 @@ $placemarks  </Document>
                     DropdownMenuItem(value: 300, child: Text('5m')),
                   ],
                   onChanged: (value) async {
-                    setState(() { _pingTimeInterval = value!; });
+                    _pingTimeInterval = value!;
                     setModalState(() {});
                     await _settingsService.setPingTimeInterval(value!);
                     _locationService.setPingTimeInterval(value!);
@@ -3636,9 +3627,8 @@ $placemarks  </Document>
                   ? IconButton(
                       icon: const Icon(Icons.clear, color: Colors.red),
                       onPressed: () {
-                        setState(() {
+                        
                           _activeSessionFilter = null;
-                        });
                         setModalState(() {});
                         _lastAggregatedSampleCount = -1; // Force reaggregation
                         _loadSamples();
@@ -3691,7 +3681,7 @@ $placemarks  </Document>
                   ? IconButton(
                       icon: const Icon(Icons.clear, color: Colors.red),
                       onPressed: () async {
-                        setState(() { _includeOnlyRepeaters = null; });
+                        _includeOnlyRepeaters = null;
                         await _settingsService.setIncludeOnlyRepeaters(null);
                         setModalState(() {});
                         _loadSamples();
@@ -3714,7 +3704,7 @@ $placemarks  </Document>
                   ? IconButton(
                       icon: const Icon(Icons.clear, color: Colors.red),
                       onPressed: () async {
-                        setState(() { _activeSourceFilter = null; });
+                        _activeSourceFilter = null;
                         setModalState(() {});
                         _lastAggregatedSampleCount = -1;
                         _loadSamples();
@@ -3746,7 +3736,7 @@ $placemarks  </Document>
                   ),
                 );
                 if (picked != null || _activeSourceFilter != null) {
-                  setState(() { _activeSourceFilter = picked; });
+                  _activeSourceFilter = picked;
                   setModalState(() {});
                   _lastAggregatedSampleCount = -1;
                   _loadSamples();
@@ -3774,7 +3764,7 @@ $placemarks  </Document>
               leading: const Icon(Icons.delete_sweep, color: Colors.orange),
               onTap: () {
                 Navigator.pop(context);
-                setState(() { _deleteMode = true; });
+                _deleteMode = true;
                 _showSnackBar('Delete mode ON — tap a coverage square or sample to delete');
               },
             ),
@@ -4012,7 +4002,13 @@ $placemarks  </Document>
         ),
       ),
     ),
-    );
+    ).then((_) {
+      // Sync parent widget state when settings sheet closes
+      if (mounted) {
+        setState(() {});
+        _loadSamples();
+      }
+    });
   }
   
   
@@ -5253,47 +5249,110 @@ $placemarks  </Document>
     }
   }
   
+  /// Reaggregate community coverage cells to match the user's coverage precision
+  Map<String, Map<String, dynamic>> _aggregateCommunityAtPrecision(
+      Map<String, dynamic> raw, int targetPrecision) {
+    final aggregated = <String, Map<String, dynamic>>{};
+    
+    raw.forEach((hash, cellData) {
+      if (cellData is! Map<String, dynamic>) return;
+      if (hash.length < targetPrecision) return;
+      
+      final key = hash.substring(0, targetPrecision);
+      
+      if (!aggregated.containsKey(key)) {
+        aggregated[key] = {
+          'received': 0.0,
+          'lost': 0.0,
+          'samples': 0,
+          'repeaters': <String, dynamic>{},
+          'lastUpdate': cellData['lastUpdate'] ?? '',
+          'appVersion': cellData['appVersion'] ?? 'unknown',
+        };
+      }
+      
+      final agg = aggregated[key]!;
+      agg['received'] = (agg['received'] as double) + ((cellData['received'] as num?)?.toDouble() ?? 0);
+      agg['lost'] = (agg['lost'] as double) + ((cellData['lost'] as num?)?.toDouble() ?? 0);
+      agg['samples'] = (agg['samples'] as int) + ((cellData['samples'] as num?)?.toInt() ?? 0);
+      
+      // Merge repeaters (keep best signal per repeater)
+      final reps = cellData['repeaters'];
+      if (reps is Map<String, dynamic>) {
+        final aggReps = agg['repeaters'] as Map<String, dynamic>;
+        reps.forEach((nodeId, rep) {
+          if (!aggReps.containsKey(nodeId) || 
+              ((rep as Map<String, dynamic>)['lastSeen'] ?? '').compareTo(
+                  (aggReps[nodeId] as Map<String, dynamic>)['lastSeen'] ?? '') > 0) {
+            aggReps[nodeId] = rep;
+          }
+        });
+      }
+      
+      // Keep most recent update
+      final cellUpdate = cellData['lastUpdate'] as String? ?? '';
+      if (cellUpdate.compareTo(agg['lastUpdate'] as String) > 0) {
+        agg['lastUpdate'] = cellUpdate;
+      }
+    });
+    
+    return aggregated;
+  }
+  
   Widget _buildCommunityCoverageLayer() {
     if (_communityCoverage == null) return const SizedBox.shrink();
+    
+    // Reaggregate community cells to match user's coverage precision
+    final aggregated = _aggregateCommunityAtPrecision(_communityCoverage!, _coveragePrecision);
+    
+    // Build set of user's coverage cell hashes to skip overlaps
+    final userCells = <String>{};
+    if (_aggregationResult != null) {
+      for (final cov in _aggregationResult!.coverages) {
+        userCells.add(cov.id);
+      }
+    }
     
     final polygons = <Polygon>[];
     final bounds = _mapController.camera.visibleBounds;
     
-    _communityCoverage!.forEach((hash, cellData) {
-      if (cellData is! Map<String, dynamic>) return;
-      final received = (cellData['received'] as num?)?.toDouble() ?? 0;
-      final lost = (cellData['lost'] as num?)?.toDouble() ?? 0;
+    aggregated.forEach((hash, cellData) {
+      final received = cellData['received'] as double;
+      final lost = cellData['lost'] as double;
       final total = received + lost;
       if (total == 0) return;
       
-      // Decode geohash to center position
+      // Skip cells that overlap with user's own coverage
+      if (userCells.contains(hash)) return;
+      
+      // Decode exact geohash bounds for precise grid alignment
       try {
-        final center = GeohashUtils.posFromHash(hash);
+        final gh = geohash.GeoHash.decode(hash);
+        final sw = gh.bounds.southWest;
+        final ne = gh.bounds.northEast;
         
-        // Viewport culling
-        if (!bounds.contains(center)) return;
+        // Viewport culling (bounding box intersection)
+        if (bounds.south > ne.latitude || bounds.north < sw.latitude ||
+            bounds.west > ne.longitude || bounds.east < sw.longitude) {
+          return;
+        }
         
         final successRate = received / total;
-        final color = successRate >= 0.7 ? const Color(0x4400CC00)
-            : successRate >= 0.3 ? const Color(0x44CCCC00)
-            : const Color(0x44CC0000);
-        
-        // Approximate cell size from geohash precision
-        final precision = hash.length;
-        final latDelta = precision >= 7 ? 0.0007 : precision >= 6 ? 0.005 : 0.04;
-        final lonDelta = precision >= 7 ? 0.001 : precision >= 6 ? 0.01 : 0.08;
+        final color = successRate >= 0.7 ? const Color(0x2200CC00)
+            : successRate >= 0.3 ? const Color(0x22CCCC00)
+            : const Color(0x22CC0000);
         
         final points = [
-          LatLng(center.latitude - latDelta, center.longitude - lonDelta),
-          LatLng(center.latitude - latDelta, center.longitude + lonDelta),
-          LatLng(center.latitude + latDelta, center.longitude + lonDelta),
-          LatLng(center.latitude + latDelta, center.longitude - lonDelta),
+          LatLng(sw.latitude, sw.longitude),
+          LatLng(sw.latitude, ne.longitude),
+          LatLng(ne.latitude, ne.longitude),
+          LatLng(ne.latitude, sw.longitude),
         ];
         
         polygons.add(Polygon(
           points: points,
           color: color,
-          borderColor: const Color(0x8800AAEE),
+          borderColor: const Color(0x4400AAEE),
           borderStrokeWidth: 1,
           isFilled: true,
         ));
@@ -5313,15 +5372,14 @@ $placemarks  </Document>
       if (cellData is! Map<String, dynamic>) continue;
       
       try {
-        final center = GeohashUtils.posFromHash(hash);
-        final precision = hash.length;
-        final latDelta = precision >= 7 ? 0.0007 : precision >= 6 ? 0.005 : 0.04;
-        final lonDelta = precision >= 7 ? 0.001 : precision >= 6 ? 0.01 : 0.08;
+        final gh = geohash.GeoHash.decode(hash);
+        final sw = gh.bounds.southWest;
+        final ne = gh.bounds.northEast;
         
-        if (point.latitude >= center.latitude - latDelta &&
-            point.latitude <= center.latitude + latDelta &&
-            point.longitude >= center.longitude - lonDelta &&
-            point.longitude <= center.longitude + lonDelta) {
+        if (point.latitude >= sw.latitude &&
+            point.latitude <= ne.latitude &&
+            point.longitude >= sw.longitude &&
+            point.longitude <= ne.longitude) {
           _showCommunityCellInfo(hash, cellData);
           return;
         }

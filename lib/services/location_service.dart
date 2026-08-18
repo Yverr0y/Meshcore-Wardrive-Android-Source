@@ -337,8 +337,11 @@ class LocationService {
       _deadZoneAlertedCells.clear();
       WidgetService.updateTrackingStatus(true);
       
-      // Start monitoring device battery for battery saver mode
-      _startBatteryMonitoring();
+      // Start monitoring device battery for battery saver mode (if enabled)
+      final batterySaverEnabled = await _settings.getBatterySaverEnabled();
+      if (batterySaverEnabled) {
+        _startBatteryMonitoring();
+      }
       
       // Load alert settings
       _deadZoneAlertsEnabled = await _settings.getDeadZoneAlertsEnabled();

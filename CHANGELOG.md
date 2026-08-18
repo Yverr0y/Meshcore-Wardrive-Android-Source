@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.43 - 2026-08-18
+
+### Fixed
+- **#34 Settings page collapsing**: Settings sheet no longer closes on every toggle change. Changes are applied live and synced when the sheet is dismissed.
+- **#32 Battery saver disable option**: New toggle in Settings to disable battery saver mode entirely. Useful when phone is plugged in but stuck at low battery percentage.
+- **Community coverage tile alignment**: Community tiles now use exact geohash bounds instead of center + delta approximation, fixing offset/distortion and aligning 1:1 with local coverage tiles.
+- **Community coverage overlapping user data**: Community cells that overlap with the user's own coverage are now hidden. Opacity reduced to avoid visual clutter.
+- **Community coverage resolution mismatch**: Downloaded tiles are now reaggregated at render time to match the user's chosen coverage precision setting.
+
+### Technical
+- Removed parent `setState()` from all settings handlers; only `setModalState()` used inside the sheet
+- Added `.then()` on `showModalBottomSheet` to sync parent state on close
+- `_aggregateCommunityAtPrecision()` groups community cells by coverage-precision geohash prefix
+- `geohash.GeoHash.decode(hash).bounds.southWest/northEast` used for exact tile bounds
+- `SettingsService`: added `batterySaverEnabled` toggle
+
 ## v1.0.42 - 2026-07-12
 
 ### Added
