@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.0.44 - 2026-09-07
+
+### Fixed
+- **Dark mode map tiles**: Replaced CARTO dark tiles (now requires API key) with OSM tiles + color inversion filter. No API key needed, works offline with cached tiles.
+- **Offline tile download**: Download now uses OSM tiles instead of CARTO, so cached tiles won't show watermarks.
+
 ## v1.0.43 - 2026-08-18
 
 ### Fixed

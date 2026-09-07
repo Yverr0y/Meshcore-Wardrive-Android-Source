@@ -1660,17 +1660,25 @@ $placemarks  </Document>
         },
       ),
       children: [
-        TileLayer(
-          urlTemplate: isDarkMode
-              ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-              : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          subdomains: isDarkMode ? const ['a', 'b', 'c', 'd'] : const [],
-          userAgentPackageName: 'com.meshcore.wardrive',
-          tileProvider: _tileCacheStore != null
-              ? CachedTileProvider(
-                  store: _tileCacheStore!,
-                )
-              : null,
+        ColorFiltered(
+          // Dark mode: invert + hue-rotate + darken to match web maps
+          colorFilter: isDarkMode
+              ? const ColorFilter.matrix(<double>[
+                   -0.4,  0.0,  0.0, 0, 100,
+                    0.0, -0.4,  0.0, 0, 100,
+                    0.0,  0.0, -0.4, 0, 100,
+                    0,     0,    0,  1,   0,
+                ])
+              : const ColorFilter.mode(Colors.transparent, BlendMode.multiply),
+          child: TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.meshcore.wardrive',
+            tileProvider: _tileCacheStore != null
+                ? CachedTileProvider(
+                    store: _tileCacheStore!,
+                  )
+                : null,
+          ),
         ),
         if (_showRouteTrail) _buildRouteTrailLayer(),
         if (_showHeatmap) _buildHeatmapLayer(),
@@ -4932,9 +4940,8 @@ $placemarks  </Document>
     
     if (result == null || !mounted) return;
     
-    final urlTemplate = isDarkMode
-        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-        : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    // Always use OSM tiles (dark mode is handled by ColorFiltered at render time)
+    const urlTemplate = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
     
     final cacheDir = (await getApplicationDocumentsDirectory()).path + '/tile_cache';
     final downloader = TileDownloadService(cacheDir);
